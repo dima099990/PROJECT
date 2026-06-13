@@ -1,0 +1,26 @@
+# venv / Python
+venv/
+.venv/
+__pycache__/
+*.pyc
+*.pyo
+
+# Секреты
+.env
+
+# Модели и данные (тяжёлое, локальное)
+models/
+*.gguf
+data/adapters/
+data/chroma/
+data/trash/
+
+# Логи
+logs/*.log
+logs/*.jsonl
+
+# Память claude-mem пишет folder-CLAUDE.md — НЕ игнорируем CLAUDE.md (память в репо)
+# (явных правил для CLAUDE.md нет — они трекаются)
+
+# Оставляем структуру пустых папок
+!**/.gitkeep

@@ -1,0 +1,38 @@
+* { box-sizing: border-box; }
+body { margin: 0; font-family: system-ui, sans-serif; background: #0f1115; color: #e6e6e6; }
+.hidden { display: none !important; }
+.muted { color: #8a90a0; }
+.err { color: #ff6b6b; min-height: 1em; margin-top: 6px; }
+
+/* Логин */
+.login { position: fixed; inset: 0; display: grid; place-items: center; background: #0f1115; }
+.login-box { background: #1a1d25; padding: 28px; border-radius: 12px; width: 280px; display: flex; flex-direction: column; gap: 10px; }
+.login-box input, .chat-input input { padding: 10px; border-radius: 8px; border: 1px solid #333; background: #11141b; color: #fff; }
+button { cursor: pointer; border: none; border-radius: 8px; padding: 8px 12px; background: #2a6ef0; color: #fff; }
+button.danger { background: #d23; }
+button:hover { opacity: .9; }
+
+/* Каркас */
+.app { display: flex; flex-direction: column; height: 100vh; }
+header { display: flex; align-items: center; gap: 10px; padding: 8px 14px; background: #1a1d25; border-bottom: 1px solid #262a35; }
+.brand { font-weight: 600; }
+.spacer { flex: 1; }
+.pill { background: #232734; padding: 3px 10px; border-radius: 999px; font-size: 12px; }
+nav#tabs { display: flex; gap: 4px; padding: 6px 10px; background: #14171f; flex-wrap: wrap; }
+.tab { background: transparent; color: #aeb4c2; padding: 6px 12px; }
+.tab.active { background: #232734; color: #fff; }
+main { flex: 1; overflow: auto; padding: 14px; }
+.panel { display: none; height: 100%; }
+.panel.active { display: block; }
+
+/* Чат */
+.chat-log { height: calc(100% - 60px); overflow: auto; display: flex; flex-direction: column; gap: 8px; }
+.msg { padding: 8px 12px; border-radius: 10px; max-width: 75%; white-space: pre-wrap; }
+.msg.user { align-self: flex-end; background: #2a6ef0; }
+.msg.bot { align-self: flex-start; background: #232734; }
+.chat-input { display: flex; gap: 8px; margin-top: 10px; }
+.chat-input input { flex: 1; }
+
+/* Карточки моделей/агентов */
+.card { background: #1a1d25; border: 1px solid #262a35; border-radius: 10px; padding: 12px; margin-bottom: 8px; display: flex; justify-content: space-between; align-items: center; }
+pre { white-space: pre-wrap; word-break: break-word; }
