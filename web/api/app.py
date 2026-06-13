@@ -6,12 +6,12 @@ import json
 from pathlib import Path
 
 from fastapi import Depends, FastAPI, WebSocket, WebSocketDisconnect
-from fastapi.responses import FileResponse, JSONResponse
+from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 import config
-from core import agents, model_registry, safety
+from core import agents, chats, coordinator, metrics, model_registry, safety
 from core.inference import engine
 from training import adapters, lora
 from web.api.auth import check_password, issue_token, require_auth
@@ -33,6 +33,12 @@ class ModelReq(BaseModel):
 
 class WorkDirsReq(BaseModel):
     work_dirs: list[str]
+
+class MsgReq(BaseModel):
+    message: str
+
+class TitleReq(BaseModel):
+    title: str
 
 
 # --- Авторизация ---
@@ -80,15 +86,60 @@ def adapters_list():
     return {"adapters": adapters.list_adapters(), "active": adapters.active_adapter}
 
 
-# --- Чат (базовый, работает сразу после загрузки модели) ---
-@app.post("/api/chat", dependencies=[Depends(require_auth)])
-def chat(req: ChatReq):
-    from core import coordinator
+# --- Чаты (несколько диалогов) ---
+@app.get("/api/chats", dependencies=[Depends(require_auth)])
+def chats_list():
+    return {"chats": chats.list_chats()}
+
+@app.post("/api/chats", dependencies=[Depends(require_auth)])
+def chats_create():
+    return chats.create_chat()
+
+@app.get("/api/chats/{cid}", dependencies=[Depends(require_auth)])
+def chats_get(cid: str):
+    c = chats.get_chat(cid)
+    if not c:
+        return JSONResponse({"ok": False}, status_code=404)
+    return {"id": c["id"], "title": c["title"], "messages": c["messages"]}
+
+@app.delete("/api/chats/{cid}", dependencies=[Depends(require_auth)])
+def chats_delete(cid: str):
+    return {"ok": chats.delete_chat(cid)}
+
+@app.patch("/api/chats/{cid}", dependencies=[Depends(require_auth)])
+def chats_rename(cid: str, req: TitleReq):
+    return {"ok": chats.rename_chat(cid, req.title)}
+
+# --- Потоковый чат: стримит токены, сохраняет диалог ---
+@app.post("/api/chats/{cid}/message", dependencies=[Depends(require_auth)])
+def chats_message(cid: str, req: MsgReq):
     if not engine.loaded:
         return JSONResponse({"ok": False, "reason": "Модель не загружена"}, status_code=409)
-    out = coordinator.chat(req.message, history=req.history, stream=False)
-    text = out["choices"][0]["message"]["content"]
-    return {"ok": True, "reply": text}
+    chat = chats.get_chat(cid)
+    if not chat:
+        return JSONResponse({"ok": False}, status_code=404)
+    history = list(chat["messages"])
+    chats.add_message(cid, "user", req.message)
+    safety.log_action("chat", {"chat": cid, "msg": req.message[:120]})
+
+    def gen():
+        acc = ""
+        try:
+            for tok in coordinator.chat_stream(req.message, history=history):
+                acc += tok
+                yield tok
+                if safety.stop_requested():
+                    break
+        finally:
+            chats.add_message(cid, "assistant", acc)
+
+    return StreamingResponse(gen(), media_type="text/plain; charset=utf-8")
+
+
+# --- Метрики системы (CPU/RAM/диск) ---
+@app.get("/api/metrics", dependencies=[Depends(require_auth)])
+def metrics_get():
+    return metrics.snapshot()
 
 
 # --- Файлы (шаг 4) ---
@@ -149,6 +200,7 @@ async def ws_status(ws: WebSocket):
                 "model": engine.model_id,
                 "training": lora.status,
                 "stop_flag": safety.stop_requested(),
+                "metrics": metrics.snapshot(),
             })
             await asyncio.sleep(2)
     except WebSocketDisconnect:

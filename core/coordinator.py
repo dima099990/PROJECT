@@ -11,10 +11,22 @@ SYSTEM_PROMPT = (
 )
 
 
-def chat(message: str, history: list[dict] | None = None, stream: bool = False):
-    """Базовый чат на активной модели."""
+def _build(message: str, history: list[dict] | None):
     messages = [{"role": "system", "content": SYSTEM_PROMPT}]
     if history:
-        messages.extend(history)
+        messages.extend({"role": m["role"], "content": m["content"]} for m in history)
     messages.append({"role": "user", "content": message})
-    return engine.chat(messages, stream=stream)
+    return messages
+
+
+def chat(message: str, history: list[dict] | None = None, stream: bool = False):
+    """Базовый чат на активной модели (нестриминговый)."""
+    return engine.chat(_build(message, history), stream=stream)
+
+
+def chat_stream(message: str, history: list[dict] | None = None):
+    """Генератор токенов (дельт) для потокового вывода."""
+    for chunk in engine.chat(_build(message, history), stream=True):
+        delta = chunk["choices"][0].get("delta", {}).get("content")
+        if delta:
+            yield delta
