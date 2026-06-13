@@ -1,1 +1,1 @@
-deepseek-7b
+deepseek-1.5b

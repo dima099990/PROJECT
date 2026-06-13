@@ -18,6 +18,9 @@ models/
 data/adapters/
 data/chroma/
 data/trash/
+data/chats.json
+data/active_model.txt
+data/custom_models.json
 
 # Логи
 logs/*.log
