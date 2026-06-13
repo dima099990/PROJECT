@@ -48,6 +48,15 @@ class MsgReq(BaseModel):
 class TitleReq(BaseModel):
     title: str
 
+class AddModelReq(BaseModel):
+    name: str
+    repo: str
+    filename: str
+    quant: str | None = ""
+    size_gb: float | None = 0
+    note: str | None = ""
+    trainable_local: bool | None = False
+
 
 # --- Авторизация ---
 @app.post("/api/login")
@@ -80,6 +89,25 @@ def models():
 def models_load(req: ModelReq):
     engine.load(req.model_id)  # качает при необходимости + грузит
     return {"ok": True, "active": engine.model_id}
+
+@app.get("/api/models/repo_files", dependencies=[Depends(require_auth)])
+def models_repo_files(repo: str):
+    try:
+        return {"files": model_registry.repo_files(repo)}
+    except Exception as e:
+        return JSONResponse({"files": [], "error": str(e)}, status_code=400)
+
+@app.post("/api/models/add", dependencies=[Depends(require_auth)])
+def models_add(req: AddModelReq):
+    try:
+        mid = model_registry.add_model(req.model_dump(exclude_none=True))
+        return {"ok": True, "id": mid}
+    except Exception as e:
+        return JSONResponse({"ok": False, "reason": str(e)}, status_code=400)
+
+@app.delete("/api/models/{model_id}", dependencies=[Depends(require_auth)])
+def models_remove(model_id: str):
+    return {"ok": model_registry.remove_model(model_id)}
 
 
 # --- Агенты ---

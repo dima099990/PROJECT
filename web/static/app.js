@@ -220,18 +220,64 @@ async function stopGen() {
 // ===== МОДЕЛИ =====
 async function loadModels() {
   const { models, active } = await apiJson("/api/models");
-  $("models-view").innerHTML = models.map(m => {
+  const cards = models.map(m => {
     let badge = m.id === active ? `<span class="card-badge badge-active">✓ ${t("active")}</span>`
               : m.downloaded ? `<span class="card-badge badge-downloaded">${t("downloaded")}</span>`
               : `<span class="card-badge badge-not-dl">⬇ ${t("not_downloaded")}</span>`;
+    const del = m.source === "custom"
+      ? `<button class="chat-action-btn" title="${t("delete")}" onclick="removeModel('${m.id}')">🗑</button>` : "";
     return `<div class="card">
       <div class="card-info">
         <div class="card-title">${escapeText(m.name)} ${badge}</div>
-        <div class="card-sub">${m.quant} · ${m.size_gb} ГБ · ${escapeText(m.note || "")}</div>
+        <div class="card-sub">${escapeText(m.quant || "")} · ${m.size_gb || "?"} ГБ · ${escapeText(m.note || "")}</div>
       </div>
+      ${del}
       <button class="btn-sm" onclick="doLoadModel('${m.id}', this)">${t("load")}</button>
     </div>`;
   }).join("");
+  $("models-view").innerHTML = addModelFormHtml() + cards;
+}
+
+function addModelFormHtml() {
+  return `<div class="card" style="display:block">
+    <div class="card-title" style="cursor:pointer" onclick="document.getElementById('add-model-body').classList.toggle('hidden')">➕ ${t("add_model")}</div>
+    <div id="add-model-body" class="hidden" style="margin-top:10px;display:flex;flex-direction:column;gap:8px">
+      <div class="card-sub">${t("add_model_hint")}</div>
+      <div style="display:flex;gap:8px">
+        <input id="am-repo" class="am-input" placeholder="${t("repo_ph")}" style="flex:1"/>
+        <button class="btn-sm" onclick="fetchRepoFiles()">${t("fetch_files")}</button>
+      </div>
+      <select id="am-file" class="am-input"><option value="">${t("filename_ph")}</option></select>
+      <input id="am-name" class="am-input" placeholder="${t("name_ph")}"/>
+      <div id="am-err" class="err"></div>
+      <button class="btn-sm" onclick="submitAddModel(this)">${t("add_btn")}</button>
+    </div>
+  </div>`;
+}
+async function fetchRepoFiles() {
+  const repo = $("am-repo").value.trim(); if (!repo) return;
+  $("am-err").textContent = t("loading");
+  try {
+    const r = await apiJson("/api/models/repo_files?repo=" + encodeURIComponent(repo));
+    if (r.error || !r.files.length) { $("am-err").textContent = r.error || t("error"); return; }
+    $("am-file").innerHTML = r.files.map(f => `<option value="${escapeText(f)}">${escapeText(f)}</option>`).join("");
+    $("am-err").textContent = "";
+  } catch (e) { $("am-err").textContent = t("error"); }
+}
+async function submitAddModel(btn) {
+  const repo = $("am-repo").value.trim();
+  const filename = $("am-file").value;
+  const name = $("am-name").value.trim() || filename.replace(".gguf", "");
+  if (!repo || !filename) { $("am-err").textContent = t("add_model_need"); return; }
+  btn.disabled = true;
+  const r = await apiJson("/api/models/add", { method: "POST", body: JSON.stringify({ name, repo, filename }) });
+  btn.disabled = false;
+  if (r.ok) { loadModels(); } else { $("am-err").textContent = r.reason || t("error"); }
+}
+async function removeModel(id) {
+  if (!confirm(t("delete") + "?")) return;
+  await api("/api/models/" + id, { method: "DELETE" });
+  loadModels();
 }
 async function doLoadModel(id, btn) {
   btn.disabled = true; btn.textContent = t("loading_model");
