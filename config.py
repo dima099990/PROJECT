@@ -83,6 +83,9 @@ INFERENCE = {
     "auto_load": True,   # грузить активную/дефолтную модель при старте сервера
 }
 
+# Бэкенд инференса: auto = выбрать лучший по железу (cuda>rocm>mps>openvino>cpu)
+INFERENCE_DEVICE = os.getenv("AI_DEVICE", "auto")  # auto|cuda|rocm|mps|openvino|cpu
+
 # --- Реестр агентов (расширяемый) ---
 AGENT_REGISTRY: dict[str, dict] = {
     "coordinator": {"name": "Координатор", "role": "Маршрутизация запросов между агентами", "tools": []},

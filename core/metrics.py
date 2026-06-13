@@ -5,6 +5,19 @@ from __future__ import annotations
 import config
 
 _psutil = None
+_device_cache = None
+
+
+def device_info() -> dict:
+    """Детект железа/бэкенда (кеш — детект дорогой)."""
+    global _device_cache
+    if _device_cache is None:
+        try:
+            from core import device
+            _device_cache = device.detect()
+        except Exception as e:
+            _device_cache = {"error": str(e)}
+    return _device_cache
 
 
 def _p():
@@ -31,6 +44,7 @@ def snapshot() -> dict:
             "disk_used_gb": round(disk.used / 1073741824, 1),
             "disk_total_gb": round(disk.total / 1073741824, 1),
             "cores": ps.cpu_count(logical=True),
+            "device": device_info(),
         }
     except Exception as e:
         return {"error": str(e)}
