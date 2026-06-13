@@ -20,6 +20,14 @@ STATIC = Path(__file__).resolve().parent.parent / "static"
 app = FastAPI(title="Local Autonomous AI")
 
 
+@app.on_event("startup")
+def _startup_autoload():
+    # Грузим активную/дефолтную модель в фоне, чтобы не блокировать старт сервера.
+    import threading
+    threading.Thread(target=__import__("core.inference", fromlist=["autoload"]).autoload,
+                     daemon=True).start()
+
+
 # --- Модели запросов ---
 class LoginReq(BaseModel):
     password: str

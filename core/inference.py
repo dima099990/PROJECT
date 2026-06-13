@@ -35,6 +35,7 @@ class Engine:
                 verbose=False,
             )
             self._model_id = model_id
+        _remember(model_id)
 
     def unload(self) -> None:
         with self._lock:
@@ -46,6 +47,8 @@ class Engine:
             raise RuntimeError("Модель не загружена")
         params = {
             "temperature": config.INFERENCE["temperature"],
+            "top_p": config.INFERENCE.get("top_p", 0.9),
+            "repeat_penalty": config.INFERENCE.get("repeat_penalty", 1.1),
             "max_tokens": config.INFERENCE["max_tokens"],
             **kw,
         }
@@ -54,3 +57,34 @@ class Engine:
 
 # Глобальный движок
 engine = Engine()
+
+# --- Запоминание активной модели + авто-загрузка при старте ---
+_ACTIVE_FILE = config.DATA_DIR / "active_model.txt"
+
+
+def _remember(model_id: str) -> None:
+    try:
+        config.DATA_DIR.mkdir(parents=True, exist_ok=True)
+        _ACTIVE_FILE.write_text(model_id, encoding="utf-8")
+    except Exception:
+        pass
+
+
+def last_model() -> str:
+    if _ACTIVE_FILE.exists():
+        mid = _ACTIVE_FILE.read_text(encoding="utf-8").strip()
+        if mid in config.MODEL_REGISTRY:
+            return mid
+    return config.DEFAULT_MODEL_ID
+
+
+def autoload() -> None:
+    """Загрузить последнюю/дефолтную модель, если она скачана (для startup)."""
+    if not config.INFERENCE.get("auto_load"):
+        return
+    mid = last_model()
+    if model_registry.is_downloaded(mid):
+        try:
+            engine.load(mid)
+        except Exception:
+            pass

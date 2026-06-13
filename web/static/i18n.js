@@ -1,31 +1,161 @@
-// Двуязычный словарь (ru/en). Переключение кнопкой в шапке.
 const I18N = {
   ru: {
-    login_title: "Вход", login_btn: "Войти", password: "Пароль", logout: "Выход",
-    stop: "СТОП", send: "Отпр.", chat_ph: "Сообщение…",
-    tab_chat: "Чат", tab_files: "Файлы", tab_agents: "Агенты", tab_models: "Модели",
-    tab_training: "Обучение", tab_logs: "Логи", tab_status: "Статус",
-    load: "Загрузить", active: "активна", download: "скачать", train: "Обучить",
+    login_title: "Вход в Local AI",
+    login_btn: "Войти",
+    password: "Пароль",
+    logout: "Выйти",
+    stop: "СТОП",
+    resume: "Продолжить",
+    send: "Отправить",
+    chat_ph: "Сообщение... (Enter — отправить, Shift+Enter — перенос)",
+    tab_chat: "Чат",
+    tab_agents: "Агенты",
+    tab_models: "Модели",
+    tab_training: "Обучение",
+    tab_logs: "Логи",
+    tab_system: "Система",
+    tab_status: "Статус",
+    new_chat: "+ Новый чат",
+    load: "Загрузить",
+    loading: "Загружается…",
+    active: "активна",
+    downloaded: "скачана",
+    not_downloaded: "не скачана",
+    train: "Обучить",
+    need_gpu: "нужен GPU-сервер",
+    local_train: "локально",
     bad_pass: "Неверный пароль",
+    model_not_loaded: "Модель не загружена",
+    model_load_hint: "Загрузите модель чтобы начать чат",
+    load_model_btn: "Загрузить модель по умолчанию",
+    loading_model: "Загрузка модели…",
+    model_loaded: "Модель загружена",
+    thinking: "Размышления",
+    copy: "Копировать",
+    copied: "Скопировано",
+    rename: "Переименовать",
+    delete: "Удалить",
+    rename_title: "Новое название чата",
+    no_chats: "Нет чатов",
+    error: "Ошибка",
+    agents_empty: "Нет агентов",
+    adapters: "Адаптеры",
+    no_adapters: "Нет адаптеров",
+    cpu: "ЦП",
+    ram: "ОЗУ",
+    disk: "Диск",
+    cores: "Ядра",
+    logs_empty: "Нет логов",
+    status_label: "Статус системы",
+    model_label: "Модель",
+    adapter_label: "Адаптер",
+    training_label: "Обучение",
+    stop_flag_label: "Стоп-флаг",
+    features_label: "Фичи",
+    deploy_mode_label: "Режим",
+    yes: "да",
+    no: "нет",
+    none: "нет",
+    active_model: "Модель",
+    generating: "Генерация…",
+    stop_gen: "Остановить",
+    send_btn: "Отправить",
+    system_panel_title: "Система",
+    last_60: "последние 60 точек",
+    training_start_ok: "Обучение запущено",
+    training_start_err: "Ошибка запуска обучения",
+    train_help: "Дообучение LoRA-адаптера под тебя. Локально реально только на малых моделях (1.5B). Данные берутся из твоих диалогов с положительной оценкой и успешно выполненных задач (полная реализация — следующий шаг).",
   },
   en: {
-    login_title: "Sign in", login_btn: "Enter", password: "Password", logout: "Logout",
-    stop: "STOP", send: "Send", chat_ph: "Message…",
-    tab_chat: "Chat", tab_files: "Files", tab_agents: "Agents", tab_models: "Models",
-    tab_training: "Training", tab_logs: "Logs", tab_status: "Status",
-    load: "Load", active: "active", download: "download", train: "Train",
+    login_title: "Sign in to Local AI",
+    login_btn: "Sign in",
+    password: "Password",
+    logout: "Sign out",
+    stop: "STOP",
+    resume: "Resume",
+    send: "Send",
+    chat_ph: "Message... (Enter to send, Shift+Enter for newline)",
+    tab_chat: "Chat",
+    tab_agents: "Agents",
+    tab_models: "Models",
+    tab_training: "Training",
+    tab_logs: "Logs",
+    tab_system: "System",
+    tab_status: "Status",
+    new_chat: "+ New chat",
+    load: "Load",
+    loading: "Loading…",
+    active: "active",
+    downloaded: "downloaded",
+    not_downloaded: "not downloaded",
+    train: "Train",
+    need_gpu: "needs GPU server",
+    local_train: "local",
     bad_pass: "Wrong password",
+    model_not_loaded: "Model not loaded",
+    model_load_hint: "Load a model to start chatting",
+    load_model_btn: "Load default model",
+    loading_model: "Loading model…",
+    model_loaded: "Model loaded",
+    thinking: "Reasoning",
+    copy: "Copy",
+    copied: "Copied",
+    rename: "Rename",
+    delete: "Delete",
+    rename_title: "New chat name",
+    no_chats: "No chats",
+    error: "Error",
+    agents_empty: "No agents",
+    adapters: "Adapters",
+    no_adapters: "No adapters",
+    cpu: "CPU",
+    ram: "RAM",
+    disk: "Disk",
+    cores: "Cores",
+    logs_empty: "No logs",
+    status_label: "System status",
+    model_label: "Model",
+    adapter_label: "Adapter",
+    training_label: "Training",
+    stop_flag_label: "Stop flag",
+    features_label: "Features",
+    deploy_mode_label: "Mode",
+    yes: "yes",
+    no: "no",
+    none: "none",
+    active_model: "Model",
+    generating: "Generating…",
+    stop_gen: "Stop",
+    send_btn: "Send",
+    system_panel_title: "System",
+    last_60: "last 60 points",
+    training_start_ok: "Training started",
+    training_start_err: "Training start error",
+    train_help: "Fine-tune a LoRA adapter for you. Locally feasible only on small models (1.5B). Data comes from your positively-rated dialogs and successfully completed tasks (full implementation — next step).",
   },
 };
+
 let LANG = localStorage.getItem("lang") || "ru";
 
-function t(key) { return (I18N[LANG] && I18N[LANG][key]) || key; }
+function t(key) {
+  return (I18N[LANG] && I18N[LANG][key]) || key;
+}
 
 function applyI18n() {
   document.documentElement.lang = LANG;
-  document.querySelectorAll("[data-i18n]").forEach(el => { el.textContent = t(el.dataset.i18n); });
-  document.querySelectorAll("[data-i18n-ph]").forEach(el => { el.placeholder = t(el.dataset.i18nPh); });
+  document.querySelectorAll("[data-i18n]").forEach(el => {
+    el.textContent = t(el.dataset.i18n);
+  });
+  document.querySelectorAll("[data-i18n-ph]").forEach(el => {
+    el.placeholder = t(el.dataset.i18nPh);
+  });
   const lb = document.getElementById("lang-btn");
   if (lb) lb.textContent = LANG === "ru" ? "EN" : "RU";
 }
-function toggleLang() { LANG = LANG === "ru" ? "en" : "ru"; localStorage.setItem("lang", LANG); applyI18n(); }
+
+function toggleLang() {
+  LANG = LANG === "ru" ? "en" : "ru";
+  localStorage.setItem("lang", LANG);
+  applyI18n();
+  if (typeof onLangChange === "function") onLangChange();
+}

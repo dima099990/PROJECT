@@ -7,56 +7,131 @@
   <link rel="stylesheet" href="/static/style.css"/>
 </head>
 <body>
-  <!-- Логин -->
-  <div id="login" class="login">
+  <!-- ЛОГИН -->
+  <div id="login">
     <div class="login-box">
-      <h2 data-i18n="login_title">Вход</h2>
+      <div class="login-logo">🤖</div>
+      <div class="login-title" data-i18n="login_title">Вход в Local AI</div>
       <input id="password" type="password" data-i18n-ph="password"/>
-      <button id="login-btn" data-i18n="login_btn">Войти</button>
+      <button id="login-btn" class="btn-primary" data-i18n="login_btn">Войти</button>
       <div id="login-err" class="err"></div>
     </div>
   </div>
 
-  <!-- Приложение -->
-  <div id="app" class="app hidden">
-    <header>
-      <span class="brand">🤖 Local AI</span>
-      <span id="status-pill" class="pill">…</span>
-      <div class="spacer"></div>
-      <button id="stop-btn" class="danger" data-i18n="stop">СТОП</button>
-      <button id="lang-btn">EN</button>
-      <button id="logout-btn" data-i18n="logout">Выход</button>
+  <!-- ПРИЛОЖЕНИЕ -->
+  <div id="app" class="hidden">
+    <header id="header">
+      <button id="sidebar-toggle" title="Меню">☰</button>
+      <span class="header-brand"><span class="header-brand-icon">🤖</span> Local AI</span>
+      <span id="header-model" class="header-model">…</span>
+      <span class="header-spacer"></span>
+      <button id="stop-btn" class="header-stop" data-i18n="stop">СТОП</button>
+      <button id="lang-btn" class="header-btn">EN</button>
+      <button id="logout-btn" class="header-btn" data-i18n="logout">Выйти</button>
     </header>
 
-    <nav id="tabs">
-      <button class="tab active" data-tab="chat"     data-i18n="tab_chat">Чат</button>
-      <button class="tab" data-tab="files"    data-i18n="tab_files">Файлы</button>
-      <button class="tab" data-tab="agents"   data-i18n="tab_agents">Агенты</button>
-      <button class="tab" data-tab="models"   data-i18n="tab_models">Модели</button>
-      <button class="tab" data-tab="training" data-i18n="tab_training">Обучение</button>
-      <button class="tab" data-tab="logs"     data-i18n="tab_logs">Логи</button>
-      <button class="tab" data-tab="status"   data-i18n="tab_status">Статус</button>
-    </nav>
-
-    <main>
-      <section id="panel-chat" class="panel active">
-        <div id="chat-log" class="chat-log"></div>
-        <div class="chat-input">
-          <input id="chat-msg" data-i18n-ph="chat_ph"/>
-          <button id="chat-send" data-i18n="send">Отпр.</button>
+    <div id="body">
+      <!-- САЙДБАР -->
+      <aside id="sidebar">
+        <div class="sidebar-top">
+          <button id="new-chat" class="btn-new-chat" data-i18n="new_chat">+ Новый чат</button>
         </div>
-      </section>
+        <nav class="sidebar-nav">
+          <button class="nav-btn active" data-panel="chat"><span class="nav-icon">💬</span><span data-i18n="tab_chat">Чат</span></button>
+          <button class="nav-btn" data-panel="models"><span class="nav-icon">🧠</span><span data-i18n="tab_models">Модели</span></button>
+          <button class="nav-btn" data-panel="agents"><span class="nav-icon">🤝</span><span data-i18n="tab_agents">Агенты</span></button>
+          <button class="nav-btn" data-panel="training"><span class="nav-icon">🎓</span><span data-i18n="tab_training">Обучение</span></button>
+          <button class="nav-btn" data-panel="logs"><span class="nav-icon">📜</span><span data-i18n="tab_logs">Логи</span></button>
+          <button class="nav-btn" data-panel="system"><span class="nav-icon">📊</span><span data-i18n="tab_system">Система</span></button>
+          <button class="nav-btn" data-panel="status"><span class="nav-icon">ⓘ</span><span data-i18n="tab_status">Статус</span></button>
+        </nav>
+        <div class="sidebar-divider"></div>
+        <div class="sidebar-section-label" data-i18n="tab_chat">Чаты</div>
+        <div id="chat-list" class="chat-list"></div>
+      </aside>
 
-      <section id="panel-files" class="panel"><div id="files-view" class="muted">—</div></section>
-      <section id="panel-agents" class="panel"><div id="agents-view" class="muted">—</div></section>
-      <section id="panel-models" class="panel"><div id="models-view" class="muted">—</div></section>
-      <section id="panel-training" class="panel"><div id="training-view" class="muted">—</div></section>
-      <section id="panel-logs" class="panel"><pre id="logs-view" class="muted">—</pre></section>
-      <section id="panel-status" class="panel"><pre id="status-view" class="muted">—</pre></section>
-    </main>
+      <!-- ОСНОВНОЕ -->
+      <main id="main">
+        <!-- ЧАТ -->
+        <section id="panel-chat" class="panel active">
+          <div id="model-banner" class="model-banner hidden">
+            <span class="model-banner-icon">⚠️</span>
+            <div class="model-banner-text">
+              <strong data-i18n="model_not_loaded">Модель не загружена</strong>
+              <span data-i18n="model_load_hint">Загрузите модель чтобы начать чат</span>
+            </div>
+            <button id="banner-load" class="btn-load-model" data-i18n="load_model_btn">Загрузить модель по умолчанию</button>
+          </div>
+          <div id="chat-log"></div>
+          <div class="chat-input-area">
+            <div class="chat-input-box">
+              <textarea id="chat-msg" rows="1" data-i18n-ph="chat_ph"></textarea>
+              <button id="chat-send" data-i18n="send">Отправить</button>
+            </div>
+          </div>
+        </section>
+
+        <!-- МОДЕЛИ -->
+        <section id="panel-models" class="panel">
+          <div class="panel-inner">
+            <div class="panel-title">🧠 <span data-i18n="tab_models">Модели</span></div>
+            <div id="models-view"></div>
+          </div>
+        </section>
+
+        <!-- АГЕНТЫ -->
+        <section id="panel-agents" class="panel">
+          <div class="panel-inner">
+            <div class="panel-title">🤝 <span data-i18n="tab_agents">Агенты</span></div>
+            <div id="agents-view"></div>
+          </div>
+        </section>
+
+        <!-- ОБУЧЕНИЕ -->
+        <section id="panel-training" class="panel">
+          <div class="panel-inner">
+            <div class="panel-title">🎓 <span data-i18n="tab_training">Обучение</span></div>
+            <div id="training-view"></div>
+          </div>
+        </section>
+
+        <!-- ЛОГИ -->
+        <section id="panel-logs" class="panel">
+          <div class="panel-inner">
+            <div class="panel-title">📜 <span data-i18n="tab_logs">Логи</span></div>
+            <div id="logs-view"></div>
+          </div>
+        </section>
+
+        <!-- СИСТЕМА -->
+        <section id="panel-system" class="panel">
+          <div class="panel-inner">
+            <div class="panel-title">📊 <span data-i18n="system_panel_title">Система</span></div>
+            <div id="metrics-grid" class="metrics-grid"></div>
+            <div class="chart-container">
+              <div class="chart-title"><span data-i18n="cpu">ЦП</span> %</div>
+              <canvas id="chart-cpu" width="800" height="120"></canvas>
+            </div>
+            <div class="chart-container">
+              <div class="chart-title"><span data-i18n="ram">ОЗУ</span> %</div>
+              <canvas id="chart-ram" width="800" height="120"></canvas>
+            </div>
+          </div>
+        </section>
+
+        <!-- СТАТУС -->
+        <section id="panel-status" class="panel">
+          <div class="panel-inner">
+            <div class="panel-title">ⓘ <span data-i18n="tab_status">Статус</span></div>
+            <div id="status-view"></div>
+          </div>
+        </section>
+      </main>
+    </div>
   </div>
 
   <script src="/static/i18n.js"></script>
+  <script src="/static/md.js"></script>
   <script src="/static/app.js"></script>
 </body>
 </html>

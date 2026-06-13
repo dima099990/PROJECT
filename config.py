@@ -76,8 +76,11 @@ INFERENCE = {
     "n_ctx": int(os.getenv("AI_N_CTX", "4096")),
     "n_threads": int(os.getenv("AI_N_THREADS", str(os.cpu_count() or 4))),
     "n_gpu_layers": int(os.getenv("AI_N_GPU_LAYERS", "0")),  # 0 = CPU-only
-    "temperature": 0.7,
+    "temperature": 0.6,
+    "top_p": 0.9,
+    "repeat_penalty": 1.1,
     "max_tokens": 1024,
+    "auto_load": True,   # грузить активную/дефолтную модель при старте сервера
 }
 
 # --- Реестр агентов (расширяемый) ---
