@@ -10,7 +10,7 @@ import venv
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent
-VENV = ROOT / "venv"
+VENV = ROOT / ".venv"
 IS_WIN = os.name == "nt"
 
 

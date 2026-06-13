@@ -1,7 +1,16 @@
 """Центральная конфигурация. Всё настраиваемое — здесь или в .env."""
 from __future__ import annotations
 import os
+import sys
 from pathlib import Path
+
+# Windows-консоль по умолчанию cp1252 — кириллица в print() падает. Форсируем UTF-8.
+if sys.platform == "win32":
+    for _s in (sys.stdout, sys.stderr):
+        try:
+            _s.reconfigure(encoding="utf-8")
+        except Exception:
+            pass
 
 ROOT = Path(__file__).resolve().parent
 
