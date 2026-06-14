@@ -16,7 +16,7 @@ from logging.handlers import RotatingFileHandler
 
 import config
 from core import agentmgr, chats, coordinator, metrics, model_registry, parser, safety, stats
-from core.inference import engine
+from core.engine import engine
 from training import adapters, lora
 from web.api.auth import check_password, issue_token, require_auth
 
@@ -39,7 +39,7 @@ for _n in ("", "uvicorn", "uvicorn.error", "uvicorn.access"):
 def _startup_autoload():
     # Грузим активную/дефолтную модель в фоне, чтобы не блокировать старт сервера.
     import threading
-    threading.Thread(target=__import__("core.inference", fromlist=["autoload"]).autoload,
+    threading.Thread(target=__import__("core.engine", fromlist=["autoload"]).autoload,
                      daemon=True).start()
 
 
@@ -292,6 +292,7 @@ def safety_workdirs(req: WorkDirsReq):
 @app.post("/api/safety/stop", dependencies=[Depends(require_auth)])
 def safety_stop():
     safety.set_stop(True)
+    engine.request_stop()
     return {"ok": True, "stop_flag": True}
 
 @app.post("/api/safety/resume", dependencies=[Depends(require_auth)])
