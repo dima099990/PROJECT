@@ -355,10 +355,15 @@ async function submitScratch(btn) {
     vocab:    parseInt($("sc-vocab").value)   || 32000,
   };
   btn.disabled = true;
-  const r = await apiJson("/api/models/scratch", { method: "POST", body: JSON.stringify(body) });
-  btn.disabled = false;
-  if (r.ok) { $("sc-err").textContent = ""; loadModels(); }
-  else { $("sc-err").textContent = r.reason || t("error"); }
+  try {
+    const r = await apiJson("/api/models/scratch", { method: "POST", body: JSON.stringify(body) });
+    if (r.ok) { $("sc-err").textContent = ""; $("sc-name").value = ""; loadModels(); }
+    else { $("sc-err").textContent = r.reason || t("error"); }
+  } catch (e) {
+    $("sc-err").textContent = (e && e.message) || t("error");
+  } finally {
+    btn.disabled = false;
+  }
 }
 
 // ===== АГЕНТЫ (CRUD) =====
@@ -590,7 +595,7 @@ function _renderLogs() {
   else {
     const prev = cp.querySelector(".logs-console");
     const wasAtBottom = !prev || prev.scrollHeight - prev.scrollTop - prev.clientHeight < 40;
-    cp.innerHTML = `<div class="logs-console" id="logs-console-box">${appLines.map(l => escapeText(l)).join("\n")}</div>`;
+    cp.innerHTML = `<pre class="logs-console" id="logs-console-box">${appLines.map(l => escapeText(l)).join("\n")}</pre>`;
     if (wasAtBottom) { const box = $("logs-console-box"); if (box) box.scrollTop = box.scrollHeight; }
   }
 }
@@ -608,78 +613,53 @@ async function loadLogs() {
   if (!_logsTimer) _logsTimer = setInterval(_fetchLogs, 3000);
 }
 
-// ===== СТАТУС =====
-let _statusMetricsTimer = null;
-let _statusCpuHist = [], _statusRamHist = [];
-
+// ===== СТАТУС (аналитика чатов/сообщений, без CPU/RAM) =====
 async function loadStatus() {
-  const [s, stats] = await Promise.all([
+  const [s, stats, chatsData] = await Promise.all([
     apiJson("/api/status"),
     apiJson("/api/stats").catch(() => ({})),
+    apiJson("/api/chats").catch(() => ({ chats: [] })),
   ]);
+  const chatsN = (chatsData.chats || []).length;
+  const total = stats.total || 0, tokens = stats.tokens || 0;
+  const avgLen = total ? Math.round(tokens / total) : 0;
 
   const card = (label, val, cls) =>
     `<div class="status-card2"><div class="sk">${label}</div><div class="sv ${cls||""}">${val}</div></div>`;
 
-  const byDay = stats.by_day || {};
-  const dayKeys = Object.keys(byDay).sort().slice(-14);
-  const maxVal = dayKeys.reduce((m, k) => Math.max(m, byDay[k] || 0), 1);
-  const barChart = dayKeys.length
-    ? `<div class="status-bar-chart">
-        <div class="status-bar-chart-title">${t("status_by_day")}</div>
-        <div class="day-bars">
-          ${dayKeys.map(k => {
-            const pct = Math.round(((byDay[k]||0) / maxVal) * 100);
-            const label = k.slice(5); // MM-DD
-            return `<div class="day-bar-wrap">
-              <div style="flex:1;display:flex;align-items:flex-end;width:100%">
-                <div class="day-bar" style="height:${pct}%" title="${k}: ${byDay[k]}"></div>
-              </div>
-              <div class="day-bar-label">${label}</div>
-            </div>`;
-          }).join("")}
-        </div>
-      </div>` : "";
+  const bars = (title, obj, color) => {
+    const keys = Object.keys(obj).sort().slice(-14);
+    const max = keys.reduce((m, k) => Math.max(m, obj[k] || 0), 1);
+    if (!keys.length) return `<div class="status-bar-chart"><div class="status-bar-chart-title">${title}</div><div class="muted">${t("no_data")}</div></div>`;
+    return `<div class="status-bar-chart"><div class="status-bar-chart-title">${title}</div>
+      <div class="day-bars">${keys.map(k => {
+        const pct = Math.round(((obj[k]||0) / max) * 100);
+        return `<div class="day-bar-wrap"><div style="flex:1;display:flex;align-items:flex-end;width:100%">
+          <div class="day-bar" style="height:${pct}%;background:${color}" title="${k}: ${obj[k]}"></div></div>
+          <div class="day-bar-label">${k.slice(5)}</div></div>`;
+      }).join("")}</div></div>`;
+  };
+
+  // токены по дням (из history)
+  const tokByDay = {};
+  (stats.history || []).forEach(h => {
+    const d = new Date((h.ts || 0) * 1000).toISOString().slice(0, 10);
+    tokByDay[d] = (tokByDay[d] || 0) + (h.tokens || 0);
+  });
 
   $("status-view").innerHTML = `
     <div class="status-cards-row">
-      ${card(t("active_model"), s.active_model || t("none"), "")}
-      ${card(t("status_backend"), (s.features && s.features.device_backend) || "cpu", "")}
+      ${card(t("status_chats"), chatsN)}
+      ${card(t("status_requests_total"), total)}
+      ${card(t("status_requests_today"), stats.today || 0)}
+      ${card(t("status_tokens"), tokens.toLocaleString())}
+      ${card(t("status_tok_s"), stats.avg_tok_s ? stats.avg_tok_s.toFixed(1) : "—")}
+      ${card(t("status_avg_len"), avgLen + " " + t("tok_short"))}
+      ${card(t("active_model"), s.active_model || t("none"))}
       ${card(t("status_model_loaded"), s.model_loaded ? t("status_yes") : t("status_no"), s.model_loaded ? "ok" : "bad")}
-      ${card(t("adapter_label"), s.active_adapter || t("none"), "")}
-      ${card(t("status_requests_total"), stats.total || 0, "")}
-      ${card(t("status_requests_today"), stats.today || 0, "")}
-      ${card(t("status_tokens"), (stats.tokens || 0).toLocaleString(), "")}
-      ${card(t("status_tok_s"), stats.avg_tok_s ? stats.avg_tok_s.toFixed(1) : "—", "")}
     </div>
-    <div class="chart-container" id="status-cpu-chart">
-      <div class="chart-title">${t("cpu")} %</div>
-      <canvas id="status-chart-cpu" width="800" height="100"></canvas>
-    </div>
-    <div class="chart-container" id="status-ram-chart">
-      <div class="chart-title">${t("ram")} %</div>
-      <canvas id="status-chart-ram" width="800" height="100"></canvas>
-    </div>
-    ${barChart}`;
-
-  // запустить поллинг метрик для статус-панели
-  if (!_statusMetricsTimer) {
-    _statusMetricsTimer = setInterval(_pollStatusMetrics, 1500);
-    _pollStatusMetrics();
-  }
-}
-
-async function _pollStatusMetrics() {
-  if (curPanel !== "status") return;
-  try {
-    const m = await apiJson("/api/metrics");
-    if (m.error) return;
-    _statusCpuHist.push(m.cpu); _statusRamHist.push(m.ram);
-    if (_statusCpuHist.length > MAXP) _statusCpuHist.shift();
-    if (_statusRamHist.length > MAXP) _statusRamHist.shift();
-    drawChart($("status-chart-cpu"), _statusCpuHist, "#7c8cf8");
-    drawChart($("status-chart-ram"), _statusRamHist, "#4ade80");
-  } catch (e) {}
+    ${bars(t("status_by_day"), stats.by_day || {}, "#7c8cf8")}
+    ${bars(t("status_tokens_by_day"), tokByDay, "#4ade80")}`;
 }
 
 // ===== СИСТЕМА (метрики + графики) =====
