@@ -11,16 +11,37 @@ CORPUS_DIR = config.DATA_DIR / "corpus"
 
 
 def fetch_url(url: str) -> dict:
-    """Скачать страницу и извлечь основной текст."""
-    import httpx  # lazy
+    """Скачать страницу и извлечь основной текст (несколько стратегий)."""
     import trafilatura  # lazy
+    html = ""
+    # 1) штатная загрузка trafilatura (надёжнее по кодировке/сжатию)
     try:
-        r = httpx.get(url, timeout=20, follow_redirects=True,
-                      headers={"User-Agent": "Mozilla/5.0 LocalAI"})
-        text = trafilatura.extract(r.text, include_comments=False) or ""
-        return {"url": url, "ok": bool(text), "chars": len(text), "text": text}
-    except Exception as e:
-        return {"url": url, "ok": False, "error": str(e), "text": ""}
+        html = trafilatura.fetch_url(url) or ""
+    except Exception:
+        html = ""
+    # 2) фолбэк httpx
+    if not html:
+        try:
+            import httpx
+            r = httpx.get(url, timeout=20, follow_redirects=True,
+                          headers={"User-Agent": "Mozilla/5.0 (LocalAI)"})
+            html = r.text if r.status_code == 200 else ""
+            if not html:
+                return {"url": url, "ok": False, "error": f"HTTP {r.status_code}", "text": ""}
+        except Exception as e:
+            return {"url": url, "ok": False, "error": str(e), "text": ""}
+    text = trafilatura.extract(html, include_comments=False, include_tables=True,
+                               favor_recall=True) or ""
+    if not text:
+        # 3) последний фолбэк — голый текст из html
+        try:
+            from bs4 import BeautifulSoup
+            text = BeautifulSoup(html, "html.parser").get_text(" ", strip=True)
+        except Exception:
+            text = ""
+    if not text:
+        return {"url": url, "ok": False, "error": "не удалось извлечь текст", "text": ""}
+    return {"url": url, "ok": True, "chars": len(text), "text": text}
 
 
 def collect(urls: list[str]) -> dict:

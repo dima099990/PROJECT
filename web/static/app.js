@@ -37,9 +37,27 @@ function logout() {
 async function showApp() {
   $("login").classList.add("hidden"); $("app").classList.remove("hidden");
   await refreshStatus();
+  loadSettings();
   await loadChats();
   setPanel("chat");
   startMetricsLoop();
+}
+
+async function loadSettings() {
+  try {
+    const s = await apiJson("/api/settings");
+    const mt = $("max-tokens");
+    if (mt && s.max_tokens) { mt.value = s.max_tokens; mt.max = s.n_ctx || 32768; }
+  } catch (e) {}
+}
+let _mtTimer = null;
+async function saveMaxTokens() {
+  const mt = $("max-tokens"); if (!mt) return;
+  const val = parseInt(mt.value) || 1024;
+  const r = await apiJson("/api/settings", { method: "POST", body: JSON.stringify({ max_tokens: val }) });
+  const s = $("max-tokens-saved");
+  if (s) { s.textContent = "✓ " + (r.max_tokens || val); setTimeout(() => { s.textContent = ""; }, 1500); }
+  if (r.max_tokens && r.max_tokens !== val) mt.value = r.max_tokens;
 }
 
 // ===== СТАТУС / МОДЕЛЬ =====
@@ -369,8 +387,11 @@ async function submitScratch(btn) {
 // ===== АГЕНТЫ (CRUD) =====
 let _agentFormMode = null; // null | "add" | {id}
 
+let _agentsCache = {};
 async function loadAgents() {
   const { agents } = await apiJson("/api/agents");
+  _agentsCache = {};
+  agents.forEach(a => { _agentsCache[a.id] = a; });
   const av = $("agents-view");
   const formHtml = _agentFormHtml();
   const cards = agents.length
@@ -380,7 +401,7 @@ async function loadAgents() {
             <div class="card-title">${escapeText(a.name)}<span class="agent-card-model">${escapeText(a.model || "sonnet")}</span></div>
             <div class="card-sub">${escapeText(a.description || t("agents_no_desc"))}</div>
           </div>
-          <button class="chat-action-btn" title="${t("agents_edit")}" onclick="editAgent(${JSON.stringify(a)})">✎</button>
+          <button class="chat-action-btn" title="${t("agents_edit")}" onclick="editAgent('${escapeText(a.id)}')">✎</button>
           <button class="chat-action-btn" title="${t("delete")}" onclick="deleteAgent('${escapeText(a.id)}')">🗑</button>
         </div>`).join("")
     : `<div class="muted">${t("agents_empty")}</div>`;
@@ -435,9 +456,9 @@ function showAgentForm(prefill) {
 }
 function hideAgentForm() { const f = $("agent-form"); if (f) f.classList.add("hidden"); }
 
-function editAgent(a) {
-  if (typeof a === "string") a = JSON.parse(a);
-  showAgentForm(a);
+function editAgent(id) {
+  const a = _agentsCache[id];
+  if (a) showAgentForm(a);
 }
 
 async function saveAgent() {
@@ -731,6 +752,7 @@ window.addEventListener("DOMContentLoaded", () => {
   $("new-chat").onclick = newChat;
   $("banner-load").onclick = () => setPanel("models");
   $("chat-send").onclick = sendMessage;
+  const _mt = $("max-tokens"); if (_mt) _mt.addEventListener("change", saveMaxTokens);
 
   const ta = $("chat-msg");
   ta.addEventListener("keydown", e => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); sendMessage(); } });

@@ -90,6 +90,10 @@ class ScratchReq(BaseModel):
     n_ctx: int = 1024
     vocab: int = 32000
 
+class SettingsReq(BaseModel):
+    max_tokens: int | None = None
+    temperature: float | None = None
+
 
 # --- Авторизация ---
 @app.post("/api/login")
@@ -169,6 +173,23 @@ def models_scratch(req: ScratchReq):
             "note": f"Своя сеть ~{round(p/1e6,1)}M параметров (обучение — Этап 7)"}
     mid = model_registry.add_model(spec)
     return {"ok": True, "id": mid, "params_m": spec["params_m"]}
+
+
+# --- Настройки генерации (макс. токенов / температура) ---
+@app.get("/api/settings", dependencies=[Depends(require_auth)])
+def settings_get():
+    return {"max_tokens": config.INFERENCE["max_tokens"],
+            "temperature": config.INFERENCE["temperature"],
+            "n_ctx": config.INFERENCE["n_ctx"]}
+
+@app.post("/api/settings", dependencies=[Depends(require_auth)])
+def settings_set(req: SettingsReq):
+    if req.max_tokens is not None:
+        config.INFERENCE["max_tokens"] = max(16, min(int(req.max_tokens), config.INFERENCE["n_ctx"]))
+    if req.temperature is not None:
+        config.INFERENCE["temperature"] = max(0.0, min(float(req.temperature), 2.0))
+    return {"ok": True, "max_tokens": config.INFERENCE["max_tokens"],
+            "temperature": config.INFERENCE["temperature"]}
 
 
 # --- Статистика запросов (панель «Статус») ---

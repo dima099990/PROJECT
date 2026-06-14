@@ -64,6 +64,11 @@
           </div>
           <div id="chat-log"></div>
           <div class="chat-input-area">
+            <div class="chat-settings">
+              <label for="max-tokens" data-i18n="max_tokens">Макс. токенов ответа</label>
+              <input id="max-tokens" type="number" min="64" max="32768" step="64" value="1024"/>
+              <span id="max-tokens-saved" class="muted"></span>
+            </div>
             <div class="chat-input-box">
               <textarea id="chat-msg" rows="1" data-i18n-ph="chat_ph"></textarea>
               <button id="chat-send" data-i18n="send">Отправить</button>

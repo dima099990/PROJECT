@@ -563,6 +563,17 @@ canvas.metric-canvas { width: 100%; height: 80px; display: block; }
 /* Размышления — моноширинный курсив, ещё один слой */
 .think-body { font-family: "Cascadia Code", "Consolas", monospace; font-style: italic; }
 
+/* ===== НАСТРОЙКА ТОКЕНОВ В ЧАТЕ ===== */
+.chat-settings {
+  display: flex; align-items: center; gap: 8px;
+  margin-bottom: 8px; font-size: 12px; color: #9ca3af;
+}
+.chat-settings input {
+  width: 90px; padding: 4px 8px; border-radius: 7px;
+  border: 1px solid #2a2f3e; background: #0d0f14; color: #e1e4eb; outline: none;
+}
+.chat-settings input:focus { border-color: #5865f2; }
+
 /* ===== ГРАФИКИ СИСТЕМЫ ===== */
 .chart-title { font-size: 12px; color: #9ca3af; font-weight: 500; margin-bottom: 8px; }
 #chart-cpu, #chart-ram { width: 100%; height: 120px; display: block; }
