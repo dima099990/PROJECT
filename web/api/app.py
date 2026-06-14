@@ -93,6 +93,7 @@ class ScratchReq(BaseModel):
 class SettingsReq(BaseModel):
     max_tokens: int | None = None
     temperature: float | None = None
+    n_ctx: int | None = None
 
 
 # --- Авторизация ---
@@ -184,12 +185,15 @@ def settings_get():
 
 @app.post("/api/settings", dependencies=[Depends(require_auth)])
 def settings_set(req: SettingsReq):
+    if req.n_ctx is not None:
+        config.INFERENCE["n_ctx"] = max(256, min(int(req.n_ctx), 131072))
     if req.max_tokens is not None:
         config.INFERENCE["max_tokens"] = max(16, min(int(req.max_tokens), config.INFERENCE["n_ctx"]))
     if req.temperature is not None:
         config.INFERENCE["temperature"] = max(0.0, min(float(req.temperature), 2.0))
+    config.save_settings()
     return {"ok": True, "max_tokens": config.INFERENCE["max_tokens"],
-            "temperature": config.INFERENCE["temperature"]}
+            "temperature": config.INFERENCE["temperature"], "n_ctx": config.INFERENCE["n_ctx"]}
 
 
 # --- Статистика запросов (панель «Статус») ---

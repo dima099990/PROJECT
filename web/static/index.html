@@ -66,7 +66,9 @@
           <div class="chat-input-area">
             <div class="chat-settings">
               <label for="max-tokens" data-i18n="max_tokens">Макс. токенов ответа</label>
-              <input id="max-tokens" type="number" min="64" max="32768" step="64" value="1024"/>
+              <input id="max-tokens" type="number" min="64" max="131072" step="64" value="1024"/>
+              <label for="n-ctx" data-i18n="ctx_tokens">Токенов чата (контекст)</label>
+              <input id="n-ctx" type="number" min="512" max="131072" step="512" value="8192"/>
               <span id="max-tokens-saved" class="muted"></span>
             </div>
             <div class="chat-input-box">

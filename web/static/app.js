@@ -46,18 +46,22 @@ async function showApp() {
 async function loadSettings() {
   try {
     const s = await apiJson("/api/settings");
-    const mt = $("max-tokens");
-    if (mt && s.max_tokens) { mt.value = s.max_tokens; mt.max = s.n_ctx || 32768; }
+    const mt = $("max-tokens"), nc = $("n-ctx");
+    if (nc && s.n_ctx) nc.value = s.n_ctx;
+    if (mt && s.max_tokens) { mt.value = s.max_tokens; mt.max = s.n_ctx || 131072; }
   } catch (e) {}
 }
-let _mtTimer = null;
-async function saveMaxTokens() {
-  const mt = $("max-tokens"); if (!mt) return;
-  const val = parseInt(mt.value) || 1024;
-  const r = await apiJson("/api/settings", { method: "POST", body: JSON.stringify({ max_tokens: val }) });
+async function saveSettings() {
+  const mt = $("max-tokens"), nc = $("n-ctx");
+  const body = {
+    max_tokens: parseInt(mt && mt.value) || 1024,
+    n_ctx: parseInt(nc && nc.value) || 8192,
+  };
+  const r = await apiJson("/api/settings", { method: "POST", body: JSON.stringify(body) });
+  if (mt && r.max_tokens) { mt.value = r.max_tokens; mt.max = r.n_ctx || 131072; }
+  if (nc && r.n_ctx) nc.value = r.n_ctx;
   const s = $("max-tokens-saved");
-  if (s) { s.textContent = "✓ " + (r.max_tokens || val); setTimeout(() => { s.textContent = ""; }, 1500); }
-  if (r.max_tokens && r.max_tokens !== val) mt.value = r.max_tokens;
+  if (s) { s.textContent = "✓"; setTimeout(() => { s.textContent = ""; }, 1500); }
 }
 
 // ===== СТАТУС / МОДЕЛЬ =====
@@ -752,7 +756,8 @@ window.addEventListener("DOMContentLoaded", () => {
   $("new-chat").onclick = newChat;
   $("banner-load").onclick = () => setPanel("models");
   $("chat-send").onclick = sendMessage;
-  const _mt = $("max-tokens"); if (_mt) _mt.addEventListener("change", saveMaxTokens);
+  const _mt = $("max-tokens"); if (_mt) _mt.addEventListener("change", saveSettings);
+  const _nc = $("n-ctx"); if (_nc) _nc.addEventListener("change", saveSettings);
 
   const ta = $("chat-msg");
   ta.addEventListener("keydown", e => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); sendMessage(); } });

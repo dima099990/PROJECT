@@ -139,6 +139,7 @@ const I18N = {
     tok_short: "ток.",
     no_data: "Пока нет данных",
     max_tokens: "Макс. токенов ответа",
+    ctx_tokens: "Токенов чата (контекст)",
   },
   en: {
     login_title: "Sign in to Local AI",
@@ -211,6 +212,7 @@ const I18N = {
     tok_short: "tok",
     no_data: "No data yet",
     max_tokens: "Max answer tokens",
+    ctx_tokens: "Chat tokens (context)",
     train_help: "Fine-tune a LoRA adapter for you. Locally feasible only on small models (1.5B). Data comes from your positively-rated dialogs and successfully completed tasks (full implementation — next step).",
     add_model: "Add model",
     add_model_hint: "Any GGUF model from HuggingFace. Paste the repo, click Files, pick a .gguf.",

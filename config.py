@@ -104,6 +104,36 @@ INFERENCE = {
 # Бэкенд инференса: auto = выбрать лучший по железу (cuda>rocm>mps>openvino>cpu)
 INFERENCE_DEVICE = os.getenv("AI_DEVICE", "auto")  # auto|cuda|rocm|mps|openvino|cpu
 
+# --- Переопределения настроек генерации (переживают перезапуск) ---
+_SETTINGS_FILE = DATA_DIR / "settings.json"
+_SETTINGS_KEYS = ("max_tokens", "temperature", "n_ctx")
+
+
+def _load_settings_overrides() -> None:
+    try:
+        import json
+        if _SETTINGS_FILE.exists():
+            ov = json.loads(_SETTINGS_FILE.read_text(encoding="utf-8"))
+            for k in _SETTINGS_KEYS:
+                if k in ov:
+                    INFERENCE[k] = ov[k]
+    except Exception:
+        pass
+
+
+def save_settings() -> None:
+    try:
+        import json
+        DATA_DIR.mkdir(parents=True, exist_ok=True)
+        _SETTINGS_FILE.write_text(
+            json.dumps({k: INFERENCE[k] for k in _SETTINGS_KEYS}, ensure_ascii=False),
+            encoding="utf-8")
+    except Exception:
+        pass
+
+
+_load_settings_overrides()
+
 # --- Реестр агентов (расширяемый) ---
 AGENT_REGISTRY: dict[str, dict] = {
     "coordinator": {"name": "Координатор", "role": "Маршрутизация запросов между агентами", "tools": []},
