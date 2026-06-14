@@ -58,6 +58,14 @@ function updateBanner() {
 
 // ===== ПАНЕЛИ =====
 function setPanel(name) {
+  // остановить таймеры предыдущей панели
+  if (curPanel === "logs" && name !== "logs" && _logsTimer) {
+    clearInterval(_logsTimer); _logsTimer = null;
+  }
+  if (curPanel === "status" && name !== "status" && _statusMetricsTimer) {
+    clearInterval(_statusMetricsTimer); _statusMetricsTimer = null;
+    _statusCpuHist = []; _statusRamHist = [];
+  }
   curPanel = name;
   document.querySelectorAll(".nav-btn").forEach(b => b.classList.toggle("active", b.dataset.panel === name));
   document.querySelectorAll(".panel").forEach(p => p.classList.toggle("active", p.id === "panel-" + name));
@@ -221,9 +229,18 @@ async function stopGen() {
 async function loadModels() {
   const { models, active } = await apiJson("/api/models");
   const cards = models.map(m => {
-    let badge = m.id === active ? `<span class="card-badge badge-active">✓ ${t("active")}</span>`
-              : m.downloaded ? `<span class="card-badge badge-downloaded">${t("downloaded")}</span>`
-              : `<span class="card-badge badge-not-dl">⬇ ${t("not_downloaded")}</span>`;
+    const isActive = m.id === active;
+    let badge, actionBtn;
+    if (isActive) {
+      badge = `<span class="card-badge badge-active">${t("models_active_btn")}</span>`;
+      actionBtn = `<button class="btn-sm" disabled>${t("models_active_btn")}</button>`;
+    } else if (m.downloaded) {
+      badge = `<span class="card-badge model-badge-installed">${t("models_status_installed")}</span>`;
+      actionBtn = `<button class="btn-sm" onclick="doLoadModel('${m.id}', this)">${t("models_run_btn")}</button>`;
+    } else {
+      badge = `<span class="card-badge model-badge-not-installed">${t("models_status_not_installed")}</span>`;
+      actionBtn = `<button class="btn-sm" onclick="doLoadModel('${m.id}', this)">${t("models_download_run_btn")}</button>`;
+    }
     const del = m.source === "custom"
       ? `<button class="chat-action-btn" title="${t("delete")}" onclick="removeModel('${m.id}')">🗑</button>` : "";
     return `<div class="card">
@@ -231,11 +248,11 @@ async function loadModels() {
         <div class="card-title">${escapeText(m.name)} ${badge}</div>
         <div class="card-sub">${escapeText(m.quant || "")} · ${m.size_gb || "?"} ГБ · ${escapeText(m.note || "")}</div>
       </div>
-      ${del}
-      <button class="btn-sm" onclick="doLoadModel('${m.id}', this)">${t("load")}</button>
+      ${del}${actionBtn}
     </div>`;
   }).join("");
-  $("models-view").innerHTML = addModelFormHtml() + cards;
+  $("models-view").innerHTML = scratchFormHtml() + addModelFormHtml() + cards;
+  _bindScratchInputs();
 }
 
 function addModelFormHtml() {
@@ -287,62 +304,382 @@ async function doLoadModel(id, btn) {
   } catch (e) { btn.textContent = t("error"); }
 }
 
-// ===== АГЕНТЫ =====
+// ===== SCRATCH (модель с нуля) =====
+function scratchFormHtml() {
+  return `<div class="scratch-form">
+    <div class="scratch-form-title" onclick="$('scratch-body').classList.toggle('hidden')">
+      ➕ ${t("models_scratch_title")}
+    </div>
+    <div id="scratch-body" class="hidden">
+      <div class="scratch-name-row">
+        <input id="sc-name" class="scratch-input" placeholder="${t("models_scratch_name_ph")}"/>
+      </div>
+      <div class="scratch-fields">
+        <div class="scratch-field"><label>${t("models_scratch_layers")}</label><input id="sc-layers" class="scratch-input" type="number" value="12" min="1"/></div>
+        <div class="scratch-field"><label>${t("models_scratch_embd")}</label><input id="sc-embd" class="scratch-input" type="number" value="768" min="64"/></div>
+        <div class="scratch-field"><label>${t("models_scratch_heads")}</label><input id="sc-heads" class="scratch-input" type="number" value="12" min="1"/></div>
+        <div class="scratch-field"><label>${t("models_scratch_ctx")}</label><input id="sc-ctx" class="scratch-input" type="number" value="1024" min="128"/></div>
+        <div class="scratch-field" style="grid-column:1/-1"><label>${t("models_scratch_vocab")}</label><input id="sc-vocab" class="scratch-input" type="number" value="32000" min="1000"/></div>
+      </div>
+      <div class="scratch-params-preview" id="sc-preview"></div>
+      <div class="scratch-err" id="sc-err"></div>
+      <button class="btn-sm" onclick="submitScratch(this)">${t("models_scratch_create")}</button>
+      <div class="training-note-text">${t("models_scratch_note")}</div>
+    </div>
+  </div>`;
+}
+function _calcScratchParams() {
+  const layers = parseInt($("sc-layers").value) || 0;
+  const embd   = parseInt($("sc-embd").value)   || 0;
+  const vocab  = parseInt($("sc-vocab").value)   || 0;
+  const p = layers * 12 * embd * embd + vocab * embd;
+  const m = Math.round(p / 1e6 * 10) / 10;
+  const prev = $("sc-preview");
+  if (prev) prev.textContent = t("models_scratch_params").replace("{n}", m);
+}
+function _bindScratchInputs() {
+  ["sc-layers","sc-embd","sc-heads","sc-ctx","sc-vocab"].forEach(id => {
+    const el = $(id); if (el) el.addEventListener("input", _calcScratchParams);
+  });
+  _calcScratchParams();
+}
+async function submitScratch(btn) {
+  const name = $("sc-name").value.trim();
+  if (!name) { $("sc-err").textContent = t("models_scratch_name_ph"); return; }
+  const body = {
+    name,
+    n_layers: parseInt($("sc-layers").value) || 12,
+    n_embd:   parseInt($("sc-embd").value)   || 768,
+    n_heads:  parseInt($("sc-heads").value)   || 12,
+    n_ctx:    parseInt($("sc-ctx").value)     || 1024,
+    vocab:    parseInt($("sc-vocab").value)   || 32000,
+  };
+  btn.disabled = true;
+  const r = await apiJson("/api/models/scratch", { method: "POST", body: JSON.stringify(body) });
+  btn.disabled = false;
+  if (r.ok) { $("sc-err").textContent = ""; loadModels(); }
+  else { $("sc-err").textContent = r.reason || t("error"); }
+}
+
+// ===== АГЕНТЫ (CRUD) =====
+let _agentFormMode = null; // null | "add" | {id}
+
 async function loadAgents() {
   const { agents } = await apiJson("/api/agents");
-  $("agents-view").innerHTML = agents.map(a => `
-    <div class="card"><div class="card-info">
-      <div class="card-title">${escapeText(a.name)}</div>
-      <div class="card-sub">${escapeText(a.role)}</div>
-      <div class="agent-tools">${(a.tools || []).map(x => `<span class="agent-tool-tag">${escapeText(x)}</span>`).join("")}</div>
-    </div></div>`).join("") || `<div class="muted">${t("agents_empty")}</div>`;
+  const av = $("agents-view");
+  const formHtml = _agentFormHtml();
+  const cards = agents.length
+    ? agents.map(a => `
+        <div class="card" id="agent-card-${escapeText(a.id)}">
+          <div class="card-info">
+            <div class="card-title">${escapeText(a.name)}<span class="agent-card-model">${escapeText(a.model || "sonnet")}</span></div>
+            <div class="card-sub">${escapeText(a.description || t("agents_no_desc"))}</div>
+          </div>
+          <button class="chat-action-btn" title="${t("agents_edit")}" onclick="editAgent(${JSON.stringify(a)})">✎</button>
+          <button class="chat-action-btn" title="${t("delete")}" onclick="deleteAgent('${escapeText(a.id)}')">🗑</button>
+        </div>`).join("")
+    : `<div class="muted">${t("agents_empty")}</div>`;
+  av.innerHTML = formHtml + cards;
+}
+
+function _agentFormHtml(prefill) {
+  const p = prefill || {};
+  return `<div class="agents-add-bar">
+    <button class="btn-sm" onclick="showAgentForm()">${t("agents_add")}</button>
+  </div>
+  <div id="agent-form" class="agent-form hidden">
+    <div class="agent-form-row">
+      <span class="agent-form-label" style="min-width:0;flex:0 0 auto">${t("agents_name_ph")}</span>
+      <input id="af-name" class="agent-input" placeholder="${t("agents_name_ph")}" value="${escapeText(p.name||"")}"/>
+    </div>
+    <div class="agent-form-row">
+      <span class="agent-form-label" style="min-width:0;flex:0 0 auto">${t("agents_model_label")}</span>
+      <select id="af-model" class="agent-model-select">
+        ${["sonnet","opus","haiku"].map(m => `<option value="${m}"${(p.model||"sonnet")===m?" selected":""}>${m}</option>`).join("")}
+      </select>
+    </div>
+    <div class="agent-form-row">
+      <textarea id="af-desc" class="agent-textarea" style="min-height:48px" placeholder="${t("agents_desc_ph")}">${escapeText(p.description||"")}</textarea>
+    </div>
+    <div class="agent-form-row">
+      <textarea id="af-prompt" class="agent-textarea" placeholder="${t("agents_prompt_ph")}">${escapeText(p.prompt||"")}</textarea>
+    </div>
+    <input type="hidden" id="af-id" value="${escapeText(p.id||"")}"/>
+    <div class="agent-form-btns">
+      <button class="btn-ghost" onclick="hideAgentForm()">${t("agents_cancel")}</button>
+      <button class="btn-sm" onclick="saveAgent()">${t("agents_save")}</button>
+    </div>
+    <div id="af-err" class="err"></div>
+  </div>`;
+}
+
+function showAgentForm(prefill) {
+  const form = $("agent-form");
+  if (!form) { loadAgents().then(() => showAgentForm(prefill)); return; }
+  if (prefill) {
+    $("af-name").value = prefill.name || "";
+    $("af-model").value = prefill.model || "sonnet";
+    $("af-desc").value = prefill.description || "";
+    $("af-prompt").value = prefill.prompt || "";
+    $("af-id").value = prefill.id || "";
+  } else {
+    $("af-name").value = ""; $("af-model").value = "sonnet";
+    $("af-desc").value = ""; $("af-prompt").value = ""; $("af-id").value = "";
+  }
+  form.classList.remove("hidden");
+}
+function hideAgentForm() { const f = $("agent-form"); if (f) f.classList.add("hidden"); }
+
+function editAgent(a) {
+  if (typeof a === "string") a = JSON.parse(a);
+  showAgentForm(a);
+}
+
+async function saveAgent() {
+  const name = $("af-name").value.trim();
+  if (!name) { $("af-err").textContent = t("agents_name_ph"); return; }
+  const body = {
+    name,
+    description: $("af-desc").value.trim(),
+    prompt: $("af-prompt").value.trim(),
+    model: $("af-model").value,
+    id: $("af-id").value || undefined,
+  };
+  const r = await apiJson("/api/agents", { method: "POST", body: JSON.stringify(body) });
+  if (r.ok) { hideAgentForm(); loadAgents(); }
+  else { $("af-err").textContent = r.reason || t("error"); }
+}
+
+async function deleteAgent(id) {
+  if (!confirm(t("delete") + "?")) return;
+  await api("/api/agents/" + id, { method: "DELETE" });
+  loadAgents();
 }
 
 // ===== ОБУЧЕНИЕ =====
 async function loadTraining() {
-  const { models } = await apiJson("/api/models");
-  const intro = `<div class="card"><div class="card-info">
-    <div class="card-title">🎓 ${t("train")}</div>
-    <div class="card-sub">${t("train_help")}</div></div></div>`;
-  const cards = models.map(m => `
-    <div class="card"><div class="card-info">
-      <div class="card-title">${escapeText(m.name)}</div>
-      <div class="card-sub">${m.trainable_local ? "✅ " + t("local_train") : "🖥 " + t("need_gpu")}</div>
+  const [{ models }, corpus] = await Promise.all([
+    apiJson("/api/models"),
+    apiJson("/api/data/corpus").catch(() => ({ files: 0, chars: 0, approx_tokens: 0 })),
+  ]);
+  const trainable = models.filter(m => m.trainable || m.trainable_local);
+  const modelOpts = trainable.length
+    ? trainable.map(m => `<option value="${escapeText(m.id)}">${escapeText(m.name)}</option>`).join("")
+    : `<option value="">${t("error")}</option>`;
+
+  $("training-view").innerHTML = `
+    <div class="training-section">
+      <div class="training-section-title">1. ${t("training_urls_label")}</div>
+      <textarea id="tr-urls" class="training-textarea" placeholder="${t("training_urls_ph")}"></textarea>
+      <div style="margin-top:10px;display:flex;gap:8px;align-items:center">
+        <button class="btn-sm" onclick="doParse()">${t("training_parse_btn")}</button>
+        <div id="tr-parse-msg" style="font-size:12px;color:#6b7280"></div>
+      </div>
+      <div id="tr-parse-result" class="training-parse-result hidden"></div>
     </div>
-    <button class="btn-sm" ${m.trainable_local ? "" : "disabled"} onclick="startTrain('${m.id}')">${t("train")}</button>
-    </div>`).join("");
-  $("training-view").innerHTML = intro + cards;
+    <div class="training-section">
+      <div class="training-section-title">${t("training_corpus_title")}</div>
+      <div class="training-corpus-row" id="tr-corpus">
+        <span class="training-corpus-item">${t("training_corpus_files")}: <strong>${corpus.files||0}</strong></span>
+        <span class="training-corpus-item">${t("training_corpus_chars")}: <strong>${(corpus.chars||0).toLocaleString()}</strong></span>
+        <span class="training-corpus-item">${t("training_corpus_tokens")}: <strong>${(corpus.approx_tokens||0).toLocaleString()}</strong></span>
+      </div>
+    </div>
+    <div class="training-section">
+      <div class="training-section-title">2. ${t("training_model_select")}</div>
+      <select id="tr-model" class="training-select">${modelOpts}</select>
+      <button class="btn-sm" onclick="doTrain()">${t("training_start_btn")}</button>
+      <div id="tr-train-msg" style="font-size:12px;color:#6b7280;margin-top:6px"></div>
+      <div class="training-note-text">${t("training_stage_note")}</div>
+    </div>`;
 }
-async function startTrain(id) {
-  const r = await apiJson("/api/training/start", { method: "POST", body: JSON.stringify({ model_id: id }) });
-  alert(r.ok ? t("training_start_ok") : (r.reason || t("training_start_err")));
+
+async function doParse() {
+  const raw = $("tr-urls").value.trim();
+  if (!raw) return;
+  const urls = raw.split("\n").map(s => s.trim()).filter(Boolean);
+  const msg = $("tr-parse-msg"); const res = $("tr-parse-result");
+  msg.textContent = t("training_parsing"); res.classList.add("hidden");
+  try {
+    const r = await apiJson("/api/data/parse", { method: "POST", body: JSON.stringify({ urls }) });
+    const summary = t("training_parse_summary")
+      .replace("{total}", r.urls || urls.length)
+      .replace("{ok}", (r.results || []).filter(x => x.ok).length)
+      .replace("{chars}", (r.chars || 0).toLocaleString())
+      .replace("{tokens}", (r.approx_tokens || 0).toLocaleString());
+    msg.textContent = summary;
+    const lines = (r.results || []).map(x =>
+      `<div class="${x.ok ? "ok" : "err-line"}">${x.ok ? "✓" : "✗"} ${escapeText(x.url)}: ${x.ok ? x.chars + " chars" : escapeText(x.error || "err")}</div>`
+    ).join("");
+    res.innerHTML = `<strong>${t("training_parse_result")}:</strong>${lines}`;
+    res.classList.remove("hidden");
+    // обновить corpus
+    const c = await apiJson("/api/data/corpus").catch(() => null);
+    if (c && $("tr-corpus")) {
+      $("tr-corpus").innerHTML = `
+        <span class="training-corpus-item">${t("training_corpus_files")}: <strong>${c.files||0}</strong></span>
+        <span class="training-corpus-item">${t("training_corpus_chars")}: <strong>${(c.chars||0).toLocaleString()}</strong></span>
+        <span class="training-corpus-item">${t("training_corpus_tokens")}: <strong>${(c.approx_tokens||0).toLocaleString()}</strong></span>`;
+    }
+  } catch (e) { msg.textContent = t("error"); }
+}
+
+async function doTrain() {
+  const model_id = $("tr-model").value; if (!model_id) return;
+  const msg = $("tr-train-msg");
+  msg.textContent = t("loading");
+  const r = await apiJson("/api/training/start", { method: "POST", body: JSON.stringify({ model_id }) });
+  msg.textContent = r.ok ? t("training_start_ok") : (r.reason || t("training_start_err"));
 }
 
 // ===== ЛОГИ =====
-async function loadLogs() {
-  try {
-    const { lines } = await apiJson("/api/logs?limit=200");
-    if (!lines.length) { $("logs-view").innerHTML = `<div class="muted">${t("logs_empty")}</div>`; return; }
+let _logsTab = "actions"; // "actions" | "console"
+let _logsFilter = "";
+let _logsTimer = null;
+let _logsPaused = false;
+let _logsData = { lines: [], app: [] };
+
+function _initLogsUI() {
+  $("logs-view").innerHTML = `
+    <div class="logs-toolbar">
+      <div class="logs-tab-btns">
+        <button class="logs-tab-btn ${_logsTab==="actions"?"active":""}" onclick="setLogsTab('actions')">${t("logs_tab_actions")}</button>
+        <button class="logs-tab-btn ${_logsTab==="console"?"active":""}" onclick="setLogsTab('console')">${t("logs_tab_console")}</button>
+      </div>
+      <input class="logs-filter" id="logs-filter" placeholder="${t("logs_filter_ph")}" value="${escapeText(_logsFilter)}" oninput="_logsFilter=this.value;_renderLogs()"/>
+      <button class="btn-ghost" id="logs-pause-btn" onclick="toggleLogsPause()">${_logsPaused ? t("logs_resume_poll") : t("logs_pause")}</button>
+    </div>
+    <div id="logs-pane-actions" class="logs-pane ${_logsTab==="actions"?"active":""}"></div>
+    <div id="logs-pane-console" class="logs-pane ${_logsTab==="console"?"active":""}"></div>`;
+}
+function setLogsTab(tab) {
+  _logsTab = tab;
+  document.querySelectorAll(".logs-tab-btn").forEach(b => b.classList.toggle("active", b.textContent.trim() === t("logs_tab_" + tab)));
+  document.querySelectorAll(".logs-pane").forEach(p => {
+    p.classList.toggle("active", p.id === "logs-pane-" + tab);
+  });
+  _renderLogs();
+}
+function toggleLogsPause() {
+  _logsPaused = !_logsPaused;
+  const b = $("logs-pause-btn");
+  if (b) b.textContent = _logsPaused ? t("logs_resume_poll") : t("logs_pause");
+}
+function _renderLogs() {
+  const flt = _logsFilter.toLowerCase();
+  // actions
+  const ap = $("logs-pane-actions"); if (!ap) return;
+  let lines = _logsData.lines || [];
+  if (flt) lines = lines.filter(l => JSON.stringify(l).toLowerCase().includes(flt));
+  if (!lines.length) { ap.innerHTML = `<div class="muted">${t("logs_empty")}</div>`; }
+  else {
     const rows = lines.slice().reverse().map(l => {
       const { ts, action, ...rest } = l;
+      const detail = Object.keys(rest).length ? JSON.stringify(rest) : "";
       return `<tr><td class="log-ts">${escapeText(ts || "")}</td>
         <td class="log-action">${escapeText(action || "")}</td>
-        <td class="log-detail">${escapeText(JSON.stringify(rest))}</td></tr>`;
+        <td class="log-detail">${escapeText(detail)}</td></tr>`;
     }).join("");
-    $("logs-view").innerHTML = `<table class="log-table"><thead><tr><th>time</th><th>action</th><th>detail</th></tr></thead><tbody>${rows}</tbody></table>`;
-  } catch (e) { $("logs-view").innerHTML = `<div class="muted">${t("error")}</div>`; }
+    ap.innerHTML = `<table class="log-table"><thead><tr><th>${t("logs_time")}</th><th>${t("logs_action")}</th><th>${t("logs_detail")}</th></tr></thead><tbody>${rows}</tbody></table>`;
+  }
+  // console
+  const cp = $("logs-pane-console"); if (!cp) return;
+  let appLines = _logsData.app || [];
+  if (flt) appLines = appLines.filter(l => l.toLowerCase().includes(flt));
+  if (!appLines.length) { cp.innerHTML = `<div class="muted">${t("logs_no_app")}</div>`; }
+  else {
+    const prev = cp.querySelector(".logs-console");
+    const wasAtBottom = !prev || prev.scrollHeight - prev.scrollTop - prev.clientHeight < 40;
+    cp.innerHTML = `<div class="logs-console" id="logs-console-box">${appLines.map(l => escapeText(l)).join("\n")}</div>`;
+    if (wasAtBottom) { const box = $("logs-console-box"); if (box) box.scrollTop = box.scrollHeight; }
+  }
+}
+async function _fetchLogs() {
+  if (_logsPaused) return;
+  try {
+    const d = await apiJson("/api/logs?limit=300");
+    _logsData = d;
+    _renderLogs();
+  } catch (e) {}
+}
+async function loadLogs() {
+  if (!$("logs-view").querySelector(".logs-toolbar")) _initLogsUI();
+  await _fetchLogs();
+  if (!_logsTimer) _logsTimer = setInterval(_fetchLogs, 3000);
 }
 
 // ===== СТАТУС =====
+let _statusMetricsTimer = null;
+let _statusCpuHist = [], _statusRamHist = [];
+
 async function loadStatus() {
-  const s = await apiJson("/api/status");
-  const row = (k, v) => `<div class="card"><div class="card-info"><div class="card-sub">${k}</div><div class="card-title">${v}</div></div></div>`;
-  $("status-view").innerHTML =
-    row(t("active_model"), s.active_model || t("none")) +
-    row(t("adapter_label"), s.active_adapter || t("none")) +
-    row(t("deploy_mode_label"), s.deploy_mode) +
-    row(t("stop_flag_label"), s.stop_flag ? t("yes") : t("no")) +
-    row(t("training_label"), (s.training && s.training.state) || "idle");
+  const [s, stats] = await Promise.all([
+    apiJson("/api/status"),
+    apiJson("/api/stats").catch(() => ({})),
+  ]);
+
+  const card = (label, val, cls) =>
+    `<div class="status-card2"><div class="sk">${label}</div><div class="sv ${cls||""}">${val}</div></div>`;
+
+  const byDay = stats.by_day || {};
+  const dayKeys = Object.keys(byDay).sort().slice(-14);
+  const maxVal = dayKeys.reduce((m, k) => Math.max(m, byDay[k] || 0), 1);
+  const barChart = dayKeys.length
+    ? `<div class="status-bar-chart">
+        <div class="status-bar-chart-title">${t("status_by_day")}</div>
+        <div class="day-bars">
+          ${dayKeys.map(k => {
+            const pct = Math.round(((byDay[k]||0) / maxVal) * 100);
+            const label = k.slice(5); // MM-DD
+            return `<div class="day-bar-wrap">
+              <div style="flex:1;display:flex;align-items:flex-end;width:100%">
+                <div class="day-bar" style="height:${pct}%" title="${k}: ${byDay[k]}"></div>
+              </div>
+              <div class="day-bar-label">${label}</div>
+            </div>`;
+          }).join("")}
+        </div>
+      </div>` : "";
+
+  $("status-view").innerHTML = `
+    <div class="status-cards-row">
+      ${card(t("active_model"), s.active_model || t("none"), "")}
+      ${card(t("status_backend"), (s.features && s.features.device_backend) || "cpu", "")}
+      ${card(t("status_model_loaded"), s.model_loaded ? t("status_yes") : t("status_no"), s.model_loaded ? "ok" : "bad")}
+      ${card(t("adapter_label"), s.active_adapter || t("none"), "")}
+      ${card(t("status_requests_total"), stats.total || 0, "")}
+      ${card(t("status_requests_today"), stats.today || 0, "")}
+      ${card(t("status_tokens"), (stats.tokens || 0).toLocaleString(), "")}
+      ${card(t("status_tok_s"), stats.avg_tok_s ? stats.avg_tok_s.toFixed(1) : "—", "")}
+    </div>
+    <div class="chart-container" id="status-cpu-chart">
+      <div class="chart-title">${t("cpu")} %</div>
+      <canvas id="status-chart-cpu" width="800" height="100"></canvas>
+    </div>
+    <div class="chart-container" id="status-ram-chart">
+      <div class="chart-title">${t("ram")} %</div>
+      <canvas id="status-chart-ram" width="800" height="100"></canvas>
+    </div>
+    ${barChart}`;
+
+  // запустить поллинг метрик для статус-панели
+  if (!_statusMetricsTimer) {
+    _statusMetricsTimer = setInterval(_pollStatusMetrics, 1500);
+    _pollStatusMetrics();
+  }
+}
+
+async function _pollStatusMetrics() {
+  if (curPanel !== "status") return;
+  try {
+    const m = await apiJson("/api/metrics");
+    if (m.error) return;
+    _statusCpuHist.push(m.cpu); _statusRamHist.push(m.ram);
+    if (_statusCpuHist.length > MAXP) _statusCpuHist.shift();
+    if (_statusRamHist.length > MAXP) _statusRamHist.shift();
+    drawChart($("status-chart-cpu"), _statusCpuHist, "#7c8cf8");
+    drawChart($("status-chart-ram"), _statusRamHist, "#4ade80");
+  } catch (e) {}
 }
 
 // ===== СИСТЕМА (метрики + графики) =====
