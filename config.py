@@ -16,6 +16,9 @@ ROOT = Path(__file__).resolve().parent
 
 # --- Пути ---
 MODELS_DIR = ROOT / "models"
+MODELS_OV_DIR = MODELS_DIR / "ov"      # OpenVINO IR (Intel)
+MODELS_HF_DIR = MODELS_DIR / "hf"      # safetensors (CUDA/прочее + обучение)
+MODELS_CUSTOM_DIR = MODELS_DIR / "custom"
 DATA_DIR = ROOT / "data"
 ADAPTERS_DIR = DATA_DIR / "adapters"
 CHROMA_DIR = DATA_DIR / "chroma"
@@ -35,47 +38,62 @@ SECRET_KEY = os.getenv("AI_SECRET", "change-me-in-env")
 DEFAULT_LANG = os.getenv("AI_LANG", "ru")  # ru | en
 
 # --- Реестр моделей -------------------------------------------------------
-# Смена модели — первоклассная фича. Добавляй сюда или через UI.
-# filename — имя GGUF в репозитории HF (квант Q4_K_M / IQ4_XS).
+# Qwen3 (dense, Apache-2.0, русский+код, дообучаемые). Модель = директория.
+#   type: ov  -> инференс из OpenVINO IR (Intel NPU/iGPU)
+#         hf  -> инференс из safetensors (CUDA/ROCm/MPS/CPU)
+#   ov_repo  -> готовый OV IR на HF (для Intel)
+#   hf_repo  -> оригинальные safetensors (обучение + инференс на CUDA/прочем)
+# Реестр сам выбирает формат под активный бэкенд (см. model_registry.resolve).
 MODEL_REGISTRY: dict[str, dict] = {
-    "deepseek-1.5b": {
-        "name": "DeepSeek-R1-Distill-Qwen-1.5B",
-        "repo": "bartowski/DeepSeek-R1-Distill-Qwen-1.5B-GGUF",
-        "filename": "DeepSeek-R1-Distill-Qwen-1.5B-Q4_K_M.gguf",
-        "quant": "Q4_K_M",
-        "size_gb": 1.1,
-        "trainable_local": True,   # дообучается на ноуте
-        "note": "Лёгкая, для тестов и локального дообучения",
+    "qwen3-8b": {
+        "name": "Qwen3-8B",
+        "type": "ov",
+        "ov_repo": "OpenVINO/Qwen3-8B-int4-ov",
+        "hf_repo": "Qwen/Qwen3-8B",
+        "quant": "int4",
+        "size_gb": 5.0,
+        "trainable": True,
+        "note": "Дефолт: ноут (Intel NPU/iGPU INT4) и сервер",
     },
-    "deepseek-7b": {
-        "name": "DeepSeek-R1-Distill-Qwen-7B",
-        "repo": "bartowski/DeepSeek-R1-Distill-Qwen-7B-GGUF",
-        "filename": "DeepSeek-R1-Distill-Qwen-7B-Q4_K_M.gguf",
-        "quant": "Q4_K_M",
-        "size_gb": 4.7,
-        "trainable_local": False,
-        "note": "Дефолт под 16 ГБ RAM",
-    },
-    "deepseek-14b": {
-        "name": "DeepSeek-R1-Distill-Qwen-14B",
-        "repo": "bartowski/DeepSeek-R1-Distill-Qwen-14B-GGUF",
-        "filename": "DeepSeek-R1-Distill-Qwen-14B-Q4_K_M.gguf",
-        "quant": "Q4_K_M",
+    "qwen3-14b": {
+        "name": "Qwen3-14B",
+        "type": "ov",
+        "ov_repo": "OpenVINO/Qwen3-14B-int4-ov",
+        "hf_repo": "Qwen/Qwen3-14B",
+        "quant": "int4",
         "size_gb": 9.0,
-        "trainable_local": False,
-        "note": "Медленно на ноуте, для сервера",
+        "trainable": True,
+        "note": "Средняя: мощный ПК / аренда GPU",
+    },
+    "qwen3-coder-30b": {
+        "name": "Qwen3-Coder-30B",
+        "type": "hf",
+        "ov_repo": "",
+        "hf_repo": "Qwen/Qwen3-Coder-30B-A3B-Instruct",
+        "quant": "fp16",
+        "size_gb": 60.0,
+        "trainable": True,
+        "note": "Код/тяжёлая: аренда GPU",
     },
 }
-DEFAULT_MODEL_ID = os.getenv("AI_DEFAULT_MODEL", "deepseek-7b")
+DEFAULT_MODEL_ID = os.getenv("AI_DEFAULT_MODEL", "qwen3-8b")
 
+
+def model_dir(model_id: str) -> Path:
+    """Директория модели на диске (зависит от типа)."""
+    spec = MODEL_REGISTRY[model_id]
+    sub = {"ov": MODELS_OV_DIR, "hf": MODELS_HF_DIR}.get(spec.get("type"), MODELS_CUSTOM_DIR)
+    return sub / model_id
+
+
+# Обратная совместимость: model_path = директория модели.
 def model_path(model_id: str) -> Path:
-    return MODELS_DIR / MODEL_REGISTRY[model_id]["filename"]
+    return model_dir(model_id)
 
-# --- Инференс (llama-cpp) ---
+# --- Инференс ---
 INFERENCE = {
-    "n_ctx": int(os.getenv("AI_N_CTX", "4096")),
+    "n_ctx": int(os.getenv("AI_N_CTX", "8192")),
     "n_threads": int(os.getenv("AI_N_THREADS", str(os.cpu_count() or 4))),
-    "n_gpu_layers": int(os.getenv("AI_N_GPU_LAYERS", "0")),  # 0 = CPU-only
     "temperature": 0.6,
     "top_p": 0.9,
     "repeat_penalty": 1.1,

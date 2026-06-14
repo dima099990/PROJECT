@@ -44,27 +44,43 @@ def list_models() -> list[dict]:
 
 
 def is_downloaded(model_id: str) -> bool:
-    return config.model_path(model_id).exists()
+    d = config.model_path(model_id)
+    return d.exists() and any(d.iterdir())
 
 
-def ensure_model(model_id: str) -> Path:
-    """Качает GGUF, если ещё нет. Возвращает путь к файлу."""
+def resolve_repo(model_id: str, backend: str | None = None) -> str:
+    """Какой репозиторий качать под активный бэкенд.
+    Intel/openvino → OV IR (ov_repo); CUDA/ROCm/MPS/CPU → safetensors (hf_repo)."""
+    m = config.MODEL_REGISTRY[model_id]
+    if backend == "openvino" and m.get("ov_repo"):
+        return m["ov_repo"]
+    return m.get("hf_repo") or m.get("repo") or m.get("ov_repo")
+
+
+def ensure_model(model_id: str, backend: str | None = None) -> Path:
+    """Качает модель-директорию (snapshot), если ещё нет. Возвращает путь к папке."""
     if model_id not in config.MODEL_REGISTRY:
         raise KeyError(f"Неизвестная модель: {model_id}")
     dst = config.model_path(model_id)
-    if dst.exists():
+    if is_downloaded(model_id):
         return dst
 
-    from huggingface_hub import hf_hub_download  # lazy
+    if backend is None:
+        try:
+            from core import device
+            backend = device.best_backend()
+        except Exception:
+            backend = "cpu"
+    repo = resolve_repo(model_id, backend)
+    if not repo:
+        raise ValueError(f"Нет репозитория для {model_id} (backend={backend})")
+
+    from huggingface_hub import snapshot_download  # lazy
     m = config.MODEL_REGISTRY[model_id]
-    config.MODELS_DIR.mkdir(parents=True, exist_ok=True)
-    print(f"Качаю {m['name']} ({m['size_gb']} ГБ)...", flush=True)
-    path = hf_hub_download(
-        repo_id=m["repo"],
-        filename=m["filename"],
-        local_dir=str(config.MODELS_DIR),
-    )
-    return Path(path)
+    dst.mkdir(parents=True, exist_ok=True)
+    print(f"Качаю {m['name']} [{repo}] (~{m.get('size_gb', '?')} ГБ)...", flush=True)
+    snapshot_download(repo_id=repo, local_dir=str(dst))
+    return dst
 
 
 def repo_files(repo: str) -> list[str]:

@@ -5,25 +5,34 @@ python-multipart>=0.0.9
 pydantic>=2.6
 websockets>=12.0
 psutil>=5.9
+httpx>=0.27
 
-# --- Инференс (GGUF, без Ollama/LM Studio) ---
-llama-cpp-python>=0.2.70
+# --- Модели / инференс / обучение (от safetensors) ---
+torch>=2.2
+transformers>=4.45
+accelerate>=0.30
+peft>=0.11
+datasets>=2.19
 huggingface_hub>=0.23
+
+# --- Intel-бэкенд (NPU/iGPU) — OpenVINO ---
+openvino>=2024.4
+openvino-genai>=2024.4
+optimum-intel>=1.20
 
 # --- Память / RAG ---
 chromadb>=0.5
 sentence-transformers>=2.7
 
-# --- Интернет ---
+# --- Интернет: парсинг + поиск ---
+trafilatura>=1.10
 duckduckgo-search>=6.1
 beautifulsoup4>=4.12
-requests>=2.31
 
-# --- Дообучение (LoRA/QLoRA) ---
-transformers>=4.41
-peft>=0.11
-accelerate>=0.30
-datasets>=2.19
-
-# --- Планировщик (задел, выключен) ---
+# --- Планировщик (задел) ---
 apscheduler>=3.10
+
+# Платформо-зависимое (ставит install.py под железо):
+#   bitsandbytes      — только CUDA (4-bit квантизация)
+#   intel-extension-for-pytorch (IPEX) — обучение на Intel XPU
+#   правильный torch-билд (cu121 / rocm / cpu) — по детекту device.py
