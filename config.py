@@ -168,7 +168,7 @@ FEATURES = {
     "stt": False,
     "tts": False,
     "vision": False,
-    "self_modify": False, # включается осознанно
+    "self_modify": True,  # рабочий git-safe режим самоизменения
 }
 
 # --- Режим развёртывания ---

@@ -408,6 +408,28 @@ def training_start(req: ModelReq):
     return lora.start_training(req.model_id)
 
 
+# --- Самоизменение кода (git-safe) ---
+@app.post("/api/selfmod/edit", dependencies=[Depends(require_auth)])
+def selfmod_edit(req: WriteReq):
+    from selfmod import self_modify
+    return self_modify.safe_edit(req.path, req.content)
+
+@app.get("/api/selfmod/history", dependencies=[Depends(require_auth)])
+def selfmod_history():
+    from selfmod import self_modify
+    return {"history": self_modify.history()}
+
+@app.get("/api/selfmod/diff", dependencies=[Depends(require_auth)])
+def selfmod_diff(sha: str):
+    from selfmod import self_modify
+    return self_modify.get_diff(sha)
+
+@app.post("/api/selfmod/rollback", dependencies=[Depends(require_auth)])
+def selfmod_rollback(req: PathReq):
+    from selfmod import self_modify
+    return self_modify.rollback(req.path)  # path = sha
+
+
 # --- WebSocket: статус-апдейты (что агент делает сейчас) ---
 @app.websocket("/ws/status")
 async def ws_status(ws: WebSocket):
