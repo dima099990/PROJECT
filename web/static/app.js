@@ -91,7 +91,7 @@ function setPanel(name) {
   curPanel = name;
   document.querySelectorAll(".nav-btn").forEach(b => b.classList.toggle("active", b.dataset.panel === name));
   document.querySelectorAll(".panel").forEach(p => p.classList.toggle("active", p.id === "panel-" + name));
-  const loaders = { models: loadModels, agents: loadAgents, training: loadTraining, logs: loadLogs, status: loadStatus, system: loadSystemOnce };
+  const loaders = { models: loadModels, agents: loadAgents, training: loadTraining, logs: loadLogs, status: loadStatus, system: loadSystemOnce, files: loadFiles, terminal: loadTerminal, selfmod: loadSelfmod };
   if (loaders[name]) loaders[name]();
 }
 
@@ -200,6 +200,8 @@ async function sendMessage() {
   const msg = ta.value.trim();
   if (!msg) return;
   if (!modelLoaded) { setPanel("models"); return; }
+  const autoCb = $("auto-mode-cb");
+  if (autoCb && autoCb.checked) { ta.value = ""; ta.style.height = "auto"; return runAgent(msg); }
   ta.value = ""; ta.style.height = "auto";
   renderMessage("user", msg, false);
 
@@ -741,6 +743,166 @@ async function toggleStopFlag() {
   const s = await apiJson("/api/safety");
   await api(s.stop_flag ? "/api/safety/resume" : "/api/safety/stop", { method: "POST" });
   refreshStatus();
+}
+
+// ===== ФАЙЛЫ =====
+function escapeAttr(s) { return String(s).replace(/\\/g, "\\\\").replace(/'/g, "\\'").replace(/"/g, "&quot;"); }
+function joinPath(base, name) { const sep = base.includes("\\") ? "\\" : "/"; return base.endsWith(sep) ? base + name : base + sep + name; }
+let _filesPath = ".";
+async function loadFiles() {
+  const r = await apiJson("/api/files?path=" + encodeURIComponent(_filesPath));
+  if (!r.ok) { $("files-view").innerHTML = `<div class="err">${escapeText(r.error || t("error"))}</div>`; return; }
+  _filesPath = r.path;
+  const items = (r.items || []).map(it => {
+    const full = joinPath(r.path, it.name);
+    const fn = it.dir ? `filesGo('${escapeAttr(full)}')` : `filesOpen('${escapeAttr(full)}')`;
+    return `<div class="file-row" onclick="${fn}">${it.dir ? "📁" : "📄"} ${escapeText(it.name)}${it.dir ? "" : ` <span class="muted">${it.size}b</span>`}</div>`;
+  }).join("") || `<div class="muted">${t("files_empty")}</div>`;
+  $("files-view").innerHTML = `
+    <div class="files-bar">
+      <button class="btn-sm" onclick="filesUp()">${t("files_up")}</button>
+      <input id="files-path" class="am-input" style="flex:1" value="${escapeText(r.path)}" onkeydown="if(event.key==='Enter')filesGo(this.value)"/>
+      <button class="btn-sm" onclick="filesGo(document.getElementById('files-path').value)">${t("files_go")}</button>
+    </div>
+    <div class="files-bar">
+      <input id="files-q" class="am-input" style="flex:1" placeholder="${t("files_search_ph")}"/>
+      <label class="muted"><input type="checkbox" id="files-content"/> ${t("files_by_content")}</label>
+      <button class="btn-sm" onclick="filesSearch()">${t("files_search_btn")}</button>
+      <button class="btn-sm" onclick="filesMkdir()">${t("files_mkdir")}</button>
+      <label class="muted"><input type="checkbox" id="files-wl" onchange="filesWhitelist(this.checked)"/> ${t("files_whitelist")}</label>
+    </div>
+    <div class="muted">${escapeText(r.path)} · ${r.writable ? t("files_writable") : t("files_readonly")}</div>
+    <div class="files-list">${items}</div>
+    <div id="files-results"></div>
+    <div id="files-editor"></div>`;
+}
+function filesGo(p) { _filesPath = p; loadFiles(); }
+function filesUp() { _filesPath = _filesPath.replace(/[\\/][^\\/]+[\\/]?$/, "") || _filesPath; loadFiles(); }
+async function filesOpen(p) {
+  const r = await apiJson("/api/files/read", { method: "POST", body: JSON.stringify({ path: p }) });
+  const e = $("files-editor");
+  if (!r.ok) { e.innerHTML = `<div class="err">${escapeText(r.error || "")}</div>`; return; }
+  e.innerHTML = `<div class="files-editor-title">${escapeText(p)}
+      <button class="btn-sm" onclick="filesDelete('${escapeAttr(p)}')">${t("files_delete")}</button></div>
+    <textarea id="files-ta" class="training-textarea" style="min-height:320px;font-family:monospace">${escapeText(r.content)}</textarea>
+    <button class="btn-sm" onclick="filesSave('${escapeAttr(p)}')">${t("files_save")}</button>`;
+}
+async function filesSave(p) { const r = await apiJson("/api/files/write", { method: "POST", body: JSON.stringify({ path: p, content: $("files-ta").value }) }); alert(r.ok ? "✓" : (r.error || t("error"))); }
+async function filesDelete(p) { if (!confirm(t("delete") + "?")) return; await apiJson("/api/files/delete", { method: "POST", body: JSON.stringify({ path: p }) }); $("files-editor").innerHTML = ""; loadFiles(); }
+async function filesMkdir() { const n = prompt(t("files_mkdir_ph")); if (!n) return; await apiJson("/api/files/mkdir", { method: "POST", body: JSON.stringify({ path: joinPath(_filesPath, n) }) }); loadFiles(); }
+async function filesSearch() {
+  const q = $("files-q").value.trim(); if (!q) return;
+  const content = $("files-content").checked;
+  const r = await apiJson(`/api/files/search?q=${encodeURIComponent(q)}&root=${encodeURIComponent(_filesPath)}&content=${content}`);
+  $("files-results").innerHTML = `<div class="files-editor-title">${t("files_search_results")} (${(r.results || []).length})</div>` +
+    ((r.results || []).map(x => `<div class="file-row" onclick="filesOpen('${escapeAttr(x.path)}')">${x.match === "content" ? "🔎" : "📄"} ${escapeText(x.path)}</div>`).join("") || `<div class="muted">${t("files_no_results")}</div>`);
+}
+async function filesWhitelist(en) { await apiJson("/api/safety/whitelist", { method: "POST", body: JSON.stringify({ enabled: en }) }); loadFiles(); }
+
+// ===== ТЕРМИНАЛ =====
+let _termTab = "shell";
+function loadTerminal() {
+  $("terminal-view").innerHTML = `
+    <div class="logs-tab-btns">
+      <button class="logs-tab-btn ${_termTab === "shell" ? "active" : ""}" onclick="termTab('shell')">${t("terminal_tab_shell")}</button>
+      <button class="logs-tab-btn ${_termTab === "python" ? "active" : ""}" onclick="termTab('python')">${t("terminal_tab_python")}</button>
+    </div>
+    <div id="term-input"></div>
+    <pre class="logs-console" id="term-out" style="min-height:300px;margin-top:10px"></pre>`;
+  termRenderInput();
+}
+function termTab(x) { _termTab = x; loadTerminal(); }
+function termRenderInput() {
+  const c = $("term-input");
+  if (_termTab === "shell")
+    c.innerHTML = `<div class="files-bar"><input id="term-cmd" class="am-input" style="flex:1" placeholder="${t("terminal_cmd_ph")}" onkeydown="if(event.key==='Enter')termRun()"/><button class="btn-sm" onclick="termRun()">${t("terminal_run")}</button></div>`;
+  else
+    c.innerHTML = `<textarea id="term-code" class="training-textarea" style="font-family:monospace" placeholder="${t("terminal_code_ph")}"></textarea><button class="btn-sm" onclick="termRun()">${t("terminal_run")}</button>`;
+}
+async function termRun() {
+  let r, head;
+  if (_termTab === "shell") {
+    const cmd = $("term-cmd").value.trim(); if (!cmd) return;
+    head = "$ " + cmd; $("term-cmd").value = "";
+    r = await apiJson("/api/shell", { method: "POST", body: JSON.stringify({ command: cmd }) });
+  } else {
+    const code = $("term-code").value; if (!code.trim()) return;
+    head = ">>> [python]";
+    r = await apiJson("/api/exec_python", { method: "POST", body: JSON.stringify({ code }) });
+  }
+  const out = `${head}\n[${t("terminal_exit")} ${r.code}]\n${r.stdout || ""}${r.stderr ? "\n" + r.stderr : ""}`;
+  const o = $("term-out"); o.textContent = out + "\n\n" + o.textContent;
+}
+
+// ===== САМО-КОД =====
+async function loadSelfmod() {
+  const h = await apiJson("/api/selfmod/history").catch(() => ({ history: [] }));
+  const rows = (h.history || []).map(x => `<tr>
+      <td class="log-ts">${new Date(x.ts * 1000).toLocaleString()}</td>
+      <td class="log-action">${escapeText(x.sha)}</td>
+      <td>${escapeText(x.subject)}</td>
+      <td><button class="btn-sm" onclick="smDiff('${escapeAttr(x.full_sha)}')">${t("selfmod_diff_btn")}</button>
+          <button class="btn-sm" onclick="smRollback('${escapeAttr(x.full_sha)}')">${t("selfmod_rollback_btn")}</button></td></tr>`).join("");
+  $("selfmod-view").innerHTML = `
+    <input id="sm-path" class="am-input" placeholder="${t("selfmod_path_ph")}"/>
+    <textarea id="sm-content" class="training-textarea" style="min-height:220px;font-family:monospace;margin-top:8px"></textarea>
+    <button class="btn-sm" onclick="smApply()">${t("selfmod_apply")}</button>
+    <div id="sm-result" style="margin:8px 0"></div>
+    <div class="files-editor-title">${t("selfmod_history_title")}</div>
+    <table class="log-table"><tbody>${rows}</tbody></table>
+    <pre class="logs-console" id="sm-diff" style="margin-top:10px"></pre>`;
+}
+async function smApply() {
+  const path = $("sm-path").value.trim(), content = $("sm-content").value;
+  if (!path) return;
+  const r = await apiJson("/api/selfmod/edit", { method: "POST", body: JSON.stringify({ path, content }) });
+  $("sm-result").innerHTML = r.ok
+    ? `<span style="color:#4ade80">${t("selfmod_ok")} · ${t("selfmod_smoke_ok")}</span>`
+    : `<span class="err">${escapeText(r.reason || t("selfmod_err"))} · ${t("selfmod_smoke_err")}</span>`;
+  if (r.diff) $("sm-diff").textContent = r.diff;
+}
+async function smDiff(sha) { const r = await apiJson("/api/selfmod/diff?sha=" + sha); $("sm-diff").textContent = r.diff || r.stat || ""; }
+async function smRollback(sha) { if (!confirm(t("selfmod_rollback_confirm"))) return; await apiJson("/api/selfmod/rollback", { method: "POST", body: JSON.stringify({ path: sha }) }); loadSelfmod(); }
+
+// ===== АВТО-АГЕНТ (ReAct) =====
+async function runAgent(task) {
+  renderMessage("user", task, false);
+  const bubble = renderMessage("assistant", "", true);
+  bubble.innerHTML = `<div class="agent-events"><em>${t("agent_running")}</em></div>`;
+  setGenerating(true);
+  await api("/api/safety/resume", { method: "POST" }).catch(() => {});
+  abortCtrl = new AbortController();
+  let html = "";
+  try {
+    const r = await fetch("/api/agent/run", {
+      method: "POST", headers: { "Content-Type": "application/json", Authorization: "Bearer " + TOKEN },
+      body: JSON.stringify({ task }), signal: abortCtrl.signal,
+    });
+    if (r.status === 409) { bubble.innerHTML = `<div class="agent-events">⚠️ ${t("agent_model_err")}</div>`; setGenerating(false); return; }
+    const reader = r.body.getReader(); const dec = new TextDecoder(); let buf = "";
+    while (true) {
+      const { done, value } = await reader.read(); if (done) break;
+      buf += dec.decode(value, { stream: true });
+      let idx;
+      while ((idx = buf.indexOf("\n")) >= 0) {
+        const line = buf.slice(0, idx); buf = buf.slice(idx + 1);
+        if (!line.trim()) continue;
+        let ev; try { ev = JSON.parse(line); } catch (e) { continue; }
+        html += renderAgentEvent(ev);
+        bubble.innerHTML = `<div class="agent-events">${html}</div>`;
+        scrollChat();
+      }
+    }
+  } catch (e) { if (e.name !== "AbortError") html += `<div>⚠️ ${t("error")}</div>`; bubble.innerHTML = `<div class="agent-events">${html}</div>`; }
+  finally { setGenerating(false); }
+}
+function renderAgentEvent(ev) {
+  if (ev.type === "thought") return `<div class="ag-ev ag-thought">${t("agent_thought")}: ${escapeText(ev.text)}</div>`;
+  if (ev.type === "tool") return `<div class="ag-ev ag-tool">${t("agent_tool")}: <b>${escapeText(ev.name)}</b> <code>${escapeText(JSON.stringify(ev.args))}</code></div>`;
+  if (ev.type === "result") { const s = JSON.stringify(ev.result).slice(0, 1500); return `<div class="ag-ev ag-result">${t("agent_result")}: <code>${escapeText(s)}</code></div>`; }
+  if (ev.type === "final") return `<div class="ag-ev ag-final">${t("agent_final")}: <div class="answer">${mdToHtml(ev.text || "")}</div></div>`;
+  if (ev.type === "stopped") return `<div class="ag-ev ag-final">${t("agent_stopped")}</div>`;
+  return "";
 }
 
 // ===== INIT =====

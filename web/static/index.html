@@ -44,6 +44,9 @@
           <button class="nav-btn" data-panel="logs"><span class="nav-icon">📜</span><span data-i18n="tab_logs">Логи</span></button>
           <button class="nav-btn" data-panel="system"><span class="nav-icon">📊</span><span data-i18n="tab_system">Система</span></button>
           <button class="nav-btn" data-panel="status"><span class="nav-icon">ⓘ</span><span data-i18n="tab_status">Статус</span></button>
+          <button class="nav-btn" data-panel="files"><span class="nav-icon">📁</span><span data-i18n="tab_files">Файлы</span></button>
+          <button class="nav-btn" data-panel="terminal"><span class="nav-icon">⌨️</span><span data-i18n="tab_terminal">Терминал</span></button>
+          <button class="nav-btn" data-panel="selfmod"><span class="nav-icon">🧬</span><span data-i18n="tab_selfmod">Само-код</span></button>
         </nav>
         <div class="sidebar-divider"></div>
         <div class="sidebar-section-label" data-i18n="tab_chat">Чаты</div>
@@ -73,6 +76,10 @@
             </div>
             <div class="chat-input-box">
               <textarea id="chat-msg" rows="1" data-i18n-ph="chat_ph"></textarea>
+              <label class="auto-mode-toggle" title="Auto-agent mode">
+                <input type="checkbox" id="auto-mode-cb"/>
+                <span class="auto-mode-label" data-i18n="auto_mode">🤖 Авто</span>
+              </label>
               <button id="chat-send" data-i18n="send">Отправить</button>
             </div>
           </div>
@@ -131,6 +138,30 @@
           <div class="panel-inner">
             <div class="panel-title">ⓘ <span data-i18n="tab_status">Статус</span></div>
             <div id="status-view"></div>
+          </div>
+        </section>
+
+        <!-- ФАЙЛЫ -->
+        <section id="panel-files" class="panel">
+          <div class="panel-inner">
+            <div class="panel-title">📁 <span data-i18n="tab_files">Файлы</span></div>
+            <div id="files-view"></div>
+          </div>
+        </section>
+
+        <!-- ТЕРМИНАЛ -->
+        <section id="panel-terminal" class="panel">
+          <div class="panel-inner">
+            <div class="panel-title">⌨️ <span data-i18n="tab_terminal">Терминал</span></div>
+            <div id="terminal-view"></div>
+          </div>
+        </section>
+
+        <!-- САМО-КОД -->
+        <section id="panel-selfmod" class="panel">
+          <div class="panel-inner">
+            <div class="panel-title">🧬 <span data-i18n="tab_selfmod">Само-код</span></div>
+            <div id="selfmod-view"></div>
           </div>
         </section>
       </main>
