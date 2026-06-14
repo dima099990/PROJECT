@@ -123,6 +123,10 @@ class CodeReq(BaseModel):
 class WhitelistReq(BaseModel):
     enabled: bool
 
+class AgentRunReq(BaseModel):
+    task: str
+    max_steps: int = 8
+
 
 # --- Авторизация ---
 @app.post("/api/login")
@@ -356,6 +360,23 @@ def shell_run(req: ShellReq):
 def exec_python_run(req: CodeReq):
     from core import tools
     return tools.exec_python(req.code, timeout=req.timeout)
+
+
+# --- Автономный агент (ReAct, потоковые события) ---
+@app.post("/api/agent/run", dependencies=[Depends(require_auth)])
+def agent_run(req: AgentRunReq):
+    from core import agent_loop
+    if not engine.loaded:
+        return JSONResponse({"ok": False, "reason": "Модель не загружена"}, status_code=409)
+    safety.set_stop(False)
+    safety.log_action("agent_run", {"task": req.task[:200]})
+
+    def gen():
+        for ev in agent_loop.run(req.task, max_steps=req.max_steps):
+            yield json.dumps(ev, ensure_ascii=False) + "\n"
+
+    return StreamingResponse(gen(), media_type="application/x-ndjson",
+                             headers={"X-Accel-Buffering": "no"})
 
 @app.post("/api/safety/whitelist", dependencies=[Depends(require_auth)])
 def safety_whitelist(req: WhitelistReq):
