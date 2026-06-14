@@ -10,14 +10,29 @@ from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
+import logging
+import time
+from logging.handlers import RotatingFileHandler
+
 import config
-from core import agents, chats, coordinator, metrics, model_registry, safety
+from core import agentmgr, chats, coordinator, metrics, model_registry, parser, safety, stats
 from core.inference import engine
 from training import adapters, lora
 from web.api.auth import check_password, issue_token, require_auth
 
 STATIC = Path(__file__).resolve().parent.parent / "static"
 app = FastAPI(title="Local Autonomous AI")
+
+# --- Лог приложения (как в консоли) → logs/app.log ---
+config.LOGS_DIR.mkdir(parents=True, exist_ok=True)
+_APP_LOG = config.LOGS_DIR / "app.log"
+_h = RotatingFileHandler(_APP_LOG, maxBytes=1_000_000, backupCount=2, encoding="utf-8")
+_h.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(name)s: %(message)s"))
+for _n in ("", "uvicorn", "uvicorn.error", "uvicorn.access"):
+    lg = logging.getLogger(_n)
+    lg.addHandler(_h)
+    if lg.level == logging.NOTSET:
+        lg.setLevel(logging.INFO)
 
 
 @app.on_event("startup")
@@ -56,6 +71,24 @@ class AddModelReq(BaseModel):
     size_gb: float | None = 0
     note: str | None = ""
     trainable_local: bool | None = False
+
+class AgentReq(BaseModel):
+    name: str
+    description: str = ""
+    prompt: str = ""
+    model: str = "sonnet"
+    id: str | None = None
+
+class ParseReq(BaseModel):
+    urls: list[str]
+
+class ScratchReq(BaseModel):
+    name: str
+    n_layers: int = 12
+    n_embd: int = 768
+    n_heads: int = 12
+    n_ctx: int = 1024
+    vocab: int = 32000
 
 
 # --- Авторизация ---
@@ -110,10 +143,48 @@ def models_remove(model_id: str):
     return {"ok": model_registry.remove_model(model_id)}
 
 
-# --- Агенты ---
+# --- Агенты (CRUD над .claude/agents/*.md) ---
 @app.get("/api/agents", dependencies=[Depends(require_auth)])
 def agents_list():
-    return {"agents": agents.list_agents()}
+    return {"agents": agentmgr.list_agents()}
+
+@app.post("/api/agents", dependencies=[Depends(require_auth)])
+def agents_save(req: AgentReq):
+    aid = agentmgr.save_agent(req.name, req.description, req.prompt, req.model, req.id)
+    return {"ok": True, "id": aid}
+
+@app.delete("/api/agents/{agent_id}", dependencies=[Depends(require_auth)])
+def agents_delete(agent_id: str):
+    return {"ok": agentmgr.delete_agent(agent_id)}
+
+
+# --- Модель с нуля (SCRATCH): регистрация архитектуры; обучение — Этап 7 ---
+@app.post("/api/models/scratch", dependencies=[Depends(require_auth)])
+def models_scratch(req: ScratchReq):
+    # приблизительный подсчёт параметров трансформера
+    p = req.n_layers * (12 * req.n_embd ** 2) + req.vocab * req.n_embd
+    spec = {"name": req.name, "type": "scratch", "repo": "", "ov_repo": "", "hf_repo": "",
+            "arch": req.model_dump(), "params_m": round(p / 1e6, 1),
+            "size_gb": round(p * 2 / 1e9, 2), "trainable": True,
+            "note": f"Своя сеть ~{round(p/1e6,1)}M параметров (обучение — Этап 7)"}
+    mid = model_registry.add_model(spec)
+    return {"ok": True, "id": mid, "params_m": spec["params_m"]}
+
+
+# --- Статистика запросов (панель «Статус») ---
+@app.get("/api/stats", dependencies=[Depends(require_auth)])
+def stats_get():
+    return stats.snapshot()
+
+
+# --- Данные: парсинг сайтов в корпус (панель «Обучение») ---
+@app.post("/api/data/parse", dependencies=[Depends(require_auth)])
+def data_parse(req: ParseReq):
+    return parser.collect(req.urls)
+
+@app.get("/api/data/corpus", dependencies=[Depends(require_auth)])
+def data_corpus():
+    return parser.corpus_stats()
 
 
 # --- Адаптеры (LoRA) ---
@@ -159,17 +230,19 @@ def chats_message(cid: str, req: MsgReq):
     safety.log_action("chat", {"chat": cid, "msg": req.message[:120]})
 
     def gen():
-        acc = ""
+        acc, n, t0 = "", 0, time.time()
         try:
             for tok in coordinator.chat_stream(req.message, history=history):
-                acc += tok
+                acc += tok; n += 1
                 yield tok
                 if safety.stop_requested():
                     break
         finally:
             chats.add_message(cid, "assistant", acc)
+            stats.record(n, time.time() - t0, engine.model_id)
 
-    return StreamingResponse(gen(), media_type="text/plain; charset=utf-8")
+    return StreamingResponse(gen(), media_type="text/plain; charset=utf-8",
+                             headers={"X-Accel-Buffering": "no", "Cache-Control": "no-cache"})
 
 
 # --- Метрики системы (CPU/RAM/диск) ---
@@ -189,14 +262,21 @@ def files(path: str = "."):
             "writable": safety.is_writable(p)}
 
 
-# --- Логи действий ---
+# --- Логи: действия (actions.jsonl) + лог приложения (как в консоли) ---
 @app.get("/api/logs", dependencies=[Depends(require_auth)])
-def logs(limit: int = 100):
+def logs(limit: int = 200):
     f = config.LOGS_DIR / "actions.jsonl"
-    if not f.exists():
-        return {"lines": []}
-    lines = f.read_text(encoding="utf-8").splitlines()[-limit:]
-    return {"lines": [json.loads(x) for x in lines]}
+    actions = []
+    if f.exists():
+        for x in f.read_text(encoding="utf-8").splitlines()[-limit:]:
+            try:
+                actions.append(json.loads(x))
+            except Exception:
+                pass
+    app_lines = []
+    if _APP_LOG.exists():
+        app_lines = _APP_LOG.read_text(encoding="utf-8", errors="replace").splitlines()[-limit:]
+    return {"lines": actions, "app": app_lines}
 
 
 # --- Страховки: рабочие папки + стоп-кнопка ---

@@ -101,17 +101,13 @@ def add_model(spec: dict) -> str:
     i = 2
     while mid in config.MODEL_REGISTRY and mid not in _load_custom():
         mid = f"{base}-{i}"; i += 1
-    entry = {
-        "name": spec.get("name") or mid,
-        "repo": spec["repo"],
-        "filename": spec["filename"],
-        "quant": spec.get("quant", ""),
-        "size_gb": float(spec.get("size_gb") or 0),
-        "trainable_local": bool(spec.get("trainable_local", False)),
-        "note": spec.get("note", ""),
-        "type": "gguf",
-        "source": "custom",
-    }
+    entry = dict(spec)
+    entry["name"] = spec.get("name") or mid
+    entry.setdefault("type", "hf")
+    entry["size_gb"] = float(spec.get("size_gb") or 0)
+    entry["note"] = spec.get("note", "")
+    entry["source"] = "custom"
+    entry.pop("id", None)
     config.MODEL_REGISTRY[mid] = entry
     custom = _load_custom(); custom[mid] = entry; _save_custom(custom)
     return mid
