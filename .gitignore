@@ -21,6 +21,8 @@ data/trash/
 data/chats.json
 data/active_model.txt
 data/custom_models.json
+data/stats.json
+data/corpus/
 
 # Логи
 logs/*.log
