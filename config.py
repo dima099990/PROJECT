@@ -145,11 +145,14 @@ AGENT_REGISTRY: dict[str, dict] = {
 
 # --- Страховки автономной работы ---
 SAFETY = {
-    # Белый список рабочих папок. Вне их — только чтение. Меняется в UI.
+    # Полный доступ к диску по умолчанию. Whitelist — опционально (вкл. в UI):
+    # если whitelist_enabled, запись разрешена только внутри work_dirs.
+    "whitelist_enabled": False,
     "work_dirs": [str(ROOT)],
     "require_confirm": False,   # автономно без подтверждений
-    "use_trash": True,         # удаление = перенос в TRASH_DIR
-    "stop_flag": False,        # стоп-кнопка из UI
+    "use_trash": True,          # удаление = перенос в TRASH_DIR (защита от необратимого)
+    "stop_flag": False,         # стоп-кнопка из UI
+    "shell_timeout": 60,        # таймаут shell-команд, сек
 }
 
 # --- Память / RAG ---

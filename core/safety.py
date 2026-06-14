@@ -24,9 +24,26 @@ def work_dirs() -> list[Path]:
 
 
 def is_writable(path: str | Path) -> bool:
-    """Запись разрешена только внутри белого списка рабочих папок."""
+    """Полный доступ по умолчанию. Если включён whitelist — только внутри work_dirs."""
+    if not config.SAFETY.get("whitelist_enabled"):
+        return True
     p = Path(path).resolve()
     return any(p == wd or wd in p.parents for wd in work_dirs())
+
+
+def git_snapshot(message: str = "auto-snapshot") -> dict:
+    """Коммит-снапшот проекта перед массовыми правками (защита/откат)."""
+    import subprocess
+    try:
+        subprocess.run(["git", "add", "-A"], cwd=config.ROOT, capture_output=True)
+        r = subprocess.run(["git", "commit", "-m", message], cwd=config.ROOT,
+                           capture_output=True, text=True)
+        sha = subprocess.run(["git", "rev-parse", "HEAD"], cwd=config.ROOT,
+                             capture_output=True, text=True).stdout.strip()
+        log_action("git_snapshot", {"sha": sha[:8], "message": message})
+        return {"ok": True, "sha": sha}
+    except Exception as e:
+        return {"ok": False, "error": str(e)}
 
 
 def log_action(action: str, detail: dict) -> None:

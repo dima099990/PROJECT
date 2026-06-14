@@ -95,6 +95,34 @@ class SettingsReq(BaseModel):
     temperature: float | None = None
     n_ctx: int | None = None
 
+class PathReq(BaseModel):
+    path: str
+
+class WriteReq(BaseModel):
+    path: str
+    content: str
+
+class EditReq(BaseModel):
+    path: str
+    old: str
+    new: str
+
+class MoveReq(BaseModel):
+    src: str
+    dst: str
+
+class ShellReq(BaseModel):
+    command: str
+    cwd: str | None = None
+    timeout: int | None = None
+
+class CodeReq(BaseModel):
+    code: str
+    timeout: int = 60
+
+class WhitelistReq(BaseModel):
+    enabled: bool
+
 
 # --- Авторизация ---
 @app.post("/api/login")
@@ -276,15 +304,63 @@ def metrics_get():
     return metrics.snapshot()
 
 
-# --- Файлы (шаг 4) ---
+# --- Файлы: полный доступ к диску (через core.tools со страховками) ---
 @app.get("/api/files", dependencies=[Depends(require_auth)])
 def files(path: str = "."):
-    p = Path(path)
-    if not p.exists():
-        return {"ok": False, "items": []}
-    items = [{"name": c.name, "dir": c.is_dir()} for c in sorted(p.iterdir())]
-    return {"ok": True, "path": str(p.resolve()), "items": items,
-            "writable": safety.is_writable(p)}
+    from core import tools
+    return tools.fs_list(path)
+
+@app.post("/api/files/read", dependencies=[Depends(require_auth)])
+def files_read(req: PathReq):
+    from core import tools
+    return tools.fs_read(req.path)
+
+@app.post("/api/files/write", dependencies=[Depends(require_auth)])
+def files_write(req: WriteReq):
+    from core import tools
+    return tools.fs_write(req.path, req.content)
+
+@app.post("/api/files/edit", dependencies=[Depends(require_auth)])
+def files_edit(req: EditReq):
+    from core import tools
+    return tools.fs_edit(req.path, req.old, req.new)
+
+@app.post("/api/files/move", dependencies=[Depends(require_auth)])
+def files_move(req: MoveReq):
+    from core import tools
+    return tools.fs_move(req.src, req.dst)
+
+@app.post("/api/files/delete", dependencies=[Depends(require_auth)])
+def files_delete(req: PathReq):
+    from core import tools
+    return tools.fs_delete(req.path)
+
+@app.post("/api/files/mkdir", dependencies=[Depends(require_auth)])
+def files_mkdir(req: PathReq):
+    from core import tools
+    return tools.fs_mkdir(req.path)
+
+@app.get("/api/files/search", dependencies=[Depends(require_auth)])
+def files_search(q: str, root: str = ".", content: bool = False):
+    from core import filesearch
+    return filesearch.search(q, root=root, by_content=content)
+
+
+# --- Терминал: shell + exec_python (полный доступ, страховки) ---
+@app.post("/api/shell", dependencies=[Depends(require_auth)])
+def shell_run(req: ShellReq):
+    from core import tools
+    return tools.shell(req.command, cwd=req.cwd, timeout=req.timeout)
+
+@app.post("/api/exec_python", dependencies=[Depends(require_auth)])
+def exec_python_run(req: CodeReq):
+    from core import tools
+    return tools.exec_python(req.code, timeout=req.timeout)
+
+@app.post("/api/safety/whitelist", dependencies=[Depends(require_auth)])
+def safety_whitelist(req: WhitelistReq):
+    config.SAFETY["whitelist_enabled"] = req.enabled
+    return {"ok": True, "whitelist_enabled": config.SAFETY["whitelist_enabled"]}
 
 
 # --- Логи: действия (actions.jsonl) + лог приложения (как в консоли) ---
