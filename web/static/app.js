@@ -84,10 +84,6 @@ function setPanel(name) {
   if (curPanel === "logs" && name !== "logs" && _logsTimer) {
     clearInterval(_logsTimer); _logsTimer = null;
   }
-  if (curPanel === "status" && name !== "status" && _statusMetricsTimer) {
-    clearInterval(_statusMetricsTimer); _statusMetricsTimer = null;
-    _statusCpuHist = []; _statusRamHist = [];
-  }
   curPanel = name;
   document.querySelectorAll(".nav-btn").forEach(b => b.classList.toggle("active", b.dataset.panel === name));
   document.querySelectorAll(".panel").forEach(p => p.classList.toggle("active", p.id === "panel-" + name));
