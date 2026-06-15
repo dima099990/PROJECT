@@ -91,7 +91,11 @@ function setPanel(name) {
   curPanel = name;
   document.querySelectorAll(".nav-btn").forEach(b => b.classList.toggle("active", b.dataset.panel === name));
   document.querySelectorAll(".panel").forEach(p => p.classList.toggle("active", p.id === "panel-" + name));
-  const loaders = { models: loadModels, agents: loadAgents, training: loadTraining, logs: loadLogs, status: loadStatus, system: loadSystemOnce, files: loadFiles, terminal: loadTerminal, selfmod: loadSelfmod };
+  const loaders = {
+    chat: () => { if (activeChatId && !generating) openChat(activeChatId); },
+    models: loadModels, agents: loadAgents, training: loadTraining, logs: loadLogs,
+    status: loadStatus, system: loadSystemOnce, files: loadFiles, terminal: loadTerminal, selfmod: loadSelfmod,
+  };
   if (loaders[name]) loaders[name]();
 }
 
