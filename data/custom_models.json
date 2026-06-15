@@ -1,0 +1,22 @@
+{
+  "main-learn": {
+    "name": "main_learn",
+    "type": "scratch",
+    "repo": "",
+    "ov_repo": "",
+    "hf_repo": "",
+    "arch": {
+      "name": "main_learn",
+      "n_layers": 50,
+      "n_embd": 1000,
+      "n_heads": 20,
+      "n_ctx": 500000,
+      "vocab": 500000
+    },
+    "params_m": 1100.0,
+    "size_gb": 2.2,
+    "trainable": true,
+    "note": "Своя сеть ~1100.0M параметров (обучение — Этап 7)",
+    "source": "custom"
+  }
+}

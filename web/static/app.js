@@ -927,10 +927,14 @@ async function pollTrain() {
   if (s.state === "running") {
     const pct = Math.round((s.progress || 0) * 100);
     if (prog) prog.style.width = pct + "%";
-    if (s.loss != null) {
-    _trainLossHist.push(s.loss);
-    _trainPplHist.push(Math.exp(s.loss));
-  }
+    // график из авторитетной истории сервера (переживает F5, точная кривая)
+    if (s.loss_history && s.loss_history.length) {
+      _trainLossHist = s.loss_history.map(h => h.loss);
+      _trainPplHist = _trainLossHist.map(l => Math.exp(Math.min(l, 20)));
+    } else if (s.loss != null) {
+      _trainLossHist.push(s.loss);
+      _trainPplHist.push(Math.exp(Math.min(s.loss, 20)));
+    }
     const speed = s.step > 0 && s.total > 0 ? (s.step / (s.total * 0.001 || 1)).toFixed(2) : "—";
     const lastLoss = s.loss != null ? s.loss.toFixed(4) : "—";
     const lastPpl = s.loss != null ? Math.exp(s.loss).toFixed(2) : "—";

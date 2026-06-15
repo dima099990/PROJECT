@@ -13,16 +13,18 @@ __pycache__/
 .env
 
 # Модели и данные (тяжёлое, локальное)
-models/
+models/*
 *.gguf
-data/adapters/
+# НО: свои модели (scratch) и реестр — пушим в git, чтобы не пересоздавать
+!models/custom/
+!models/custom/**
 data/chroma/
 data/trash/
 data/chats.json
 data/active_model.txt
-data/custom_models.json
 data/stats.json
 data/settings.json
+data/training_history.json
 data/parse_history.json
 data/session_history.md
 data/corpus/

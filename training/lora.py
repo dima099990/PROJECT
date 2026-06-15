@@ -8,9 +8,22 @@ import config
 status: dict = {
     "state": "idle", "progress": 0.0, "loss": None, "stage": "",
     "model_id": None, "step": 0, "total": 0, "adapter": None, "error": None,
-    "warnings": [],
+    "warnings": [], "loss_history": [],
 }
 _thread: threading.Thread | None = None
+
+
+def _step_update(step: int, total: int, loss_val: float) -> None:
+    """Обновить прогресс + накопить историю лосса для графика."""
+    lv = round(float(loss_val), 4)
+    status["step"] = step
+    status["total"] = total
+    status["progress"] = round(step / total, 3) if total else 0.0
+    status["loss"] = lv
+    lh = status.setdefault("loss_history", [])
+    lh.append({"step": step, "loss": lv})
+    if len(lh) > 500:
+        del lh[:-500]
 
 
 def _save_training_history(model_id: str, mode: str, epochs: int, steps: int, loss: float) -> None:
@@ -217,8 +230,7 @@ def _train(model_id: str, epochs: int, lr: float, force: bool = False) -> None:
                 opt.step()
                 opt.zero_grad()
                 step += 1
-                status.update(step=step, progress=round(step / total, 3),
-                              loss=round(float(loss.item()), 4))
+                _step_update(step, total, loss.item())
                 if step % 50 == 0:
                     gc.collect()
 
@@ -284,8 +296,7 @@ def _train_full(model_id: str, epochs: int, lr: float) -> None:
             opt.step()
             opt.zero_grad()
             step += 1
-            status.update(step=step, progress=round(step / total, 3),
-                          loss=round(float(out.loss.item()), 4))
+            _step_update(step, total, out.loss.item())
             if step % 50 == 0:
                 gc.collect()
 
@@ -319,7 +330,7 @@ def _train_scratch_new(model_id: str, epochs: int, lr: float) -> None:
     if n_embd % n_heads != 0:
         n_embd = (n_embd // n_heads) * n_heads
     cfg = LlamaConfig(
-        vocab_size=int(arch.get("vocab", len(tok))),
+        vocab_size=len(tok),  # ОБЯЗАНО совпадать с токенизатором (иначе index out of range)
         hidden_size=n_embd,
         intermediate_size=n_embd * 4,
         num_hidden_layers=int(arch.get("n_layers", 12)),
@@ -355,8 +366,7 @@ def _train_scratch_new(model_id: str, epochs: int, lr: float) -> None:
             opt.step()
             opt.zero_grad()
             step += 1
-            status.update(step=step, progress=round(step / total, 3),
-                          loss=round(float(out.loss.item()), 4))
+            _step_update(step, total, out.loss.item())
             if step % 50 == 0:
                 gc.collect()
 
@@ -449,7 +459,7 @@ def start_training(model_id: str, mode: str = "scratch",
                    epochs: int = 1, lr: float = 2e-4,
                    force: bool = False) -> dict:
     global _thread
-    status.update(warnings=[])
+    status.update(warnings=[], loss_history=[], loss=None, step=0, progress=0.0, error=None)
     if mode not in ("adapter", "scratch", "distill"):
         return {"ok": False, "reason": "режим должен быть adapter/scratch/distill"}
     if status["state"] in ("running", "stopping"):
