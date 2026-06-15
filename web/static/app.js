@@ -494,10 +494,8 @@ async function loadTraining() {
     apiJson("/api/models"),
     apiJson("/api/data/corpus").catch(() => ({ files: 0, chars: 0, approx_tokens: 0 })),
   ]);
-  const trainable = models.filter(m => m.trainable || m.trainable_local);
-  const modelOpts = trainable.length
-    ? trainable.map(m => `<option value="${escapeText(m.id)}">${escapeText(m.name)}</option>`).join("")
-    : `<option value="">${t("error")}</option>`;
+  const allOpts = models.map(m => `<option value="${escapeText(m.id)}">${escapeText(m.name)}${m.type === "scratch" ? " (своя)" : ""}</option>`).join("");
+  const modelOpts = allOpts || `<option value="">${t("error")}</option>`;
 
   $("training-view").innerHTML = `
     <div class="training-section">
@@ -519,10 +517,25 @@ async function loadTraining() {
     </div>
     <div class="training-section">
       <div class="training-section-title">2. ${t("training_model_select")}</div>
-      <select id="tr-model" class="training-select">${modelOpts}</select>
+      <div class="files-bar">
+        <label class="muted">${t("train_mode")}</label>
+        <select id="tr-mode" class="training-select" onchange="document.getElementById('tr-teacher-row').style.display=this.value==='distill'?'flex':'none'">
+          <option value="adapter">${t("train_mode_adapter")}</option>
+          <option value="scratch">${t("train_mode_scratch")}</option>
+          <option value="distill">${t("train_mode_distill")}</option>
+        </select>
+      </div>
+      <div class="files-bar">
+        <label class="muted">${t("train_target")}</label>
+        <select id="tr-model" class="training-select">${modelOpts}</select>
+      </div>
+      <div class="files-bar" id="tr-teacher-row" style="display:none">
+        <label class="muted">${t("train_teacher")}</label>
+        <select id="tr-teacher" class="training-select">${modelOpts}</select>
+      </div>
       <button class="btn-sm" onclick="doTrain()">${t("training_start_btn")}</button>
       <div id="tr-train-msg" style="font-size:12px;color:#6b7280;margin-top:6px"></div>
-      <div class="training-note-text">${t("training_stage_note")}</div>
+      <div class="training-note-text">${t("train_modes_note")}</div>
     </div>`;
 }
 
@@ -559,9 +572,11 @@ async function doParse() {
 let _trainTimer = null;
 async function doTrain() {
   const model_id = $("tr-model").value; if (!model_id) return;
+  const mode = ($("tr-mode") || {}).value || "adapter";
+  const teacher_id = mode === "distill" ? ($("tr-teacher") || {}).value : null;
   const msg = $("tr-train-msg");
   msg.textContent = t("loading");
-  const r = await apiJson("/api/training/start", { method: "POST", body: JSON.stringify({ model_id }) });
+  const r = await apiJson("/api/training/start", { method: "POST", body: JSON.stringify({ model_id, mode, teacher_id }) });
   if (!r.ok) { msg.textContent = r.reason || t("training_start_err"); return; }
   if (_trainTimer) clearInterval(_trainTimer);
   _trainTimer = setInterval(pollTrain, 1500); pollTrain();
