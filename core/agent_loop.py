@@ -35,19 +35,42 @@ def system_prompt() -> str:
     )
 
 
+# нормализованные имена инструментов (fslist -> fs_list, webfetch -> web_fetch и т.п.)
+_NORM = {re.sub(r"[^a-z0-9]", "", k.lower()): k for k in TOOL_DOC}
+
+
+def resolve_tool_name(name: str) -> str | None:
+    if not name:
+        return None
+    key = re.sub(r"[^a-z0-9]", "", name.lower())
+    return _NORM.get(key)
+
+
 def parse_tool_calls(text: str) -> list[dict]:
-    calls = []
-    for m in re.findall(r"<tool_call>\s*(\{.*?\})\s*</tool_call>", text, re.S):
+    calls, seen = [], set()
+
+    def _add(raw):
         try:
-            calls.append(json.loads(m))
+            obj = json.loads(raw)
+            if isinstance(obj, dict) and obj.get("name") and raw not in seen:
+                seen.add(raw)
+                calls.append(obj)
         except Exception:
             pass
-    if not calls:  # фолбэк: ```json {...} ```
-        for m in re.findall(r"```(?:json)?\s*(\{.*?\"name\".*?\})\s*```", text, re.S):
-            try:
-                calls.append(json.loads(m))
-            except Exception:
-                pass
+
+    # JSON-объект с одним уровнем вложенности (arguments — вложенный объект)
+    obj = r"(\{(?:[^{}]|\{[^{}]*\})*\})"
+    # <tool_call> / <toolcall> (подчёркивание/пробел опц., закрытие опц.)
+    for m in re.findall(r"<tool[_\s]?call>\s*" + obj, text, re.S | re.I):
+        _add(m)
+    # ```json {...} ```
+    for m in re.findall(r"```(?:json)?\s*" + obj + r"\s*```", text, re.S):
+        _add(m)
+    # голый JSON с "name" (последний фолбэк)
+    if not calls:
+        for m in re.findall(obj, text, re.S):
+            if '"name"' in m:
+                _add(m)
     return calls
 
 
@@ -76,11 +99,17 @@ def run(task: str, max_steps: int = 8,
             yield {"type": "thought", "step": step, "text": thought}
         messages.append({"role": "assistant", "content": out})
         for call in calls:
-            name = call.get("name")
-            args = call.get("arguments") or {}
-            fn = tools.REGISTRY.get(name)
-            yield {"type": "tool", "step": step, "name": name, "args": args}
-            res = fn(**args) if fn else {"ok": False, "error": f"неизвестный инструмент {name}"}
+            raw_name = call.get("name")
+            resolved = resolve_tool_name(raw_name)
+            args = call.get("arguments") or call.get("args") or {}
+            if isinstance(args, str):
+                try:
+                    args = json.loads(args)
+                except Exception:
+                    args = {}
+            fn = tools.REGISTRY.get(resolved) if resolved else None
+            yield {"type": "tool", "step": step, "name": resolved or raw_name, "args": args}
+            res = fn(**args) if fn else {"ok": False, "error": f"неизвестный инструмент {raw_name}"}
             yield {"type": "result", "step": step, "name": name, "result": res}
             messages.append({"role": "tool",
                              "content": json.dumps(res, ensure_ascii=False)[:4000]})
