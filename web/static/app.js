@@ -556,13 +556,31 @@ async function doParse() {
   } catch (e) { msg.textContent = t("error"); }
 }
 
+let _trainTimer = null;
 async function doTrain() {
   const model_id = $("tr-model").value; if (!model_id) return;
   const msg = $("tr-train-msg");
   msg.textContent = t("loading");
   const r = await apiJson("/api/training/start", { method: "POST", body: JSON.stringify({ model_id }) });
-  msg.textContent = r.ok ? t("training_start_ok") : (r.reason || t("training_start_err"));
+  if (!r.ok) { msg.textContent = r.reason || t("training_start_err"); return; }
+  if (_trainTimer) clearInterval(_trainTimer);
+  _trainTimer = setInterval(pollTrain, 1500); pollTrain();
 }
+async function pollTrain() {
+  const s = await apiJson("/api/training/status").catch(() => null);
+  if (!s) return;
+  const msg = $("tr-train-msg");
+  if (s.state === "running") {
+    msg.innerHTML = `⏳ ${escapeText(s.stage)} — ${Math.round((s.progress || 0) * 100)}% (шаг ${s.step}/${s.total}, loss ${s.loss != null ? s.loss : "—"}) <button class="btn-sm" onclick="stopTrain()">⏹ ${t("stop_gen")}</button>`;
+  } else if (s.state === "done") {
+    msg.textContent = `✅ ${t("training_start_ok")} · ${s.adapter}`; clearInterval(_trainTimer); _trainTimer = null;
+  } else if (s.state === "error") {
+    msg.textContent = `⚠ ${s.error || t("error")}`; clearInterval(_trainTimer); _trainTimer = null;
+  } else if (s.state === "stopped") {
+    msg.textContent = "⏹"; clearInterval(_trainTimer); _trainTimer = null;
+  } else { msg.textContent = s.stage || ""; }
+}
+async function stopTrain() { await apiJson("/api/training/stop", { method: "POST" }); }
 
 // ===== ЛОГИ =====
 let _logsTab = "actions"; // "actions" | "console"

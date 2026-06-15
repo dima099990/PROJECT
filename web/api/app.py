@@ -423,10 +423,18 @@ def safety_resume():
     return {"ok": True, "stop_flag": False}
 
 
-# --- Обучение (шаг 6) ---
+# --- Обучение LoRA без GPU (фоновый поток) ---
 @app.post("/api/training/start", dependencies=[Depends(require_auth)])
 def training_start(req: ModelReq):
     return lora.start_training(req.model_id)
+
+@app.get("/api/training/status", dependencies=[Depends(require_auth)])
+def training_status():
+    return lora.status
+
+@app.post("/api/training/stop", dependencies=[Depends(require_auth)])
+def training_stop():
+    return lora.stop_training()
 
 
 # --- Самоизменение кода (git-safe) ---
