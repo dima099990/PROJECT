@@ -255,6 +255,14 @@ def data_corpus():
 def adapters_list():
     return {"adapters": adapters.list_adapters(), "active": adapters.active_adapter}
 
+@app.post("/api/adapters/attach", dependencies=[Depends(require_auth)])
+def adapters_attach(req: PathReq):
+    return adapters.attach(req.path)  # path = adapter_id
+
+@app.post("/api/adapters/detach", dependencies=[Depends(require_auth)])
+def adapters_detach():
+    return adapters.detach()
+
 
 # --- Чаты (несколько диалогов) ---
 @app.get("/api/chats", dependencies=[Depends(require_auth)])

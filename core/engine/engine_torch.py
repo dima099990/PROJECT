@@ -47,6 +47,12 @@ class TorchEngine(BaseEngine):
         self.backend = f"torch/{be}"
         self.model_id = model_id
 
+    def load_adapter(self, path: str) -> None:
+        """Подключить LoRA-адаптер поверх базовой модели (peft)."""
+        from peft import PeftModel
+        self.model = PeftModel.from_pretrained(self.model, path)
+        self.model.eval()
+
     def _encode(self, messages: list[dict]) -> dict:
         """Возвращает dict {input_ids[, attention_mask]} на устройстве модели."""
         enc = None

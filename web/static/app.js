@@ -275,8 +275,39 @@ async function loadModels() {
       ${del}${actionBtn}
     </div>`;
   }).join("");
-  $("models-view").innerHTML = scratchFormHtml() + addModelFormHtml() + cards;
+  $("models-view").innerHTML = `<div id="adapters-section"></div>` + scratchFormHtml() + addModelFormHtml() + cards;
   _bindScratchInputs();
+  loadAdaptersSection();
+}
+
+async function loadAdaptersSection() {
+  const sec = $("adapters-section"); if (!sec) return;
+  const r = await apiJson("/api/adapters").catch(() => ({ adapters: [], active: null }));
+  if (!r.adapters || !r.adapters.length) {
+    sec.innerHTML = `<div class="muted" style="margin-bottom:10px">${t("no_adapters")}</div>`;
+    return;
+  }
+  const rows = r.adapters.map(a => `
+    <div class="card">
+      <div class="card-info">
+        <div class="card-title">${escapeText(a.id)} ${a.active ? `<span class="card-badge badge-active">✓ ${t("active")}</span>` : ""}</div>
+        <div class="card-sub">${t("adapter_base")}: ${escapeText(a.base || "?")}</div>
+      </div>
+      ${a.active
+        ? `<button class="btn-sm" onclick="detachAdapter()">${t("adapter_detach")}</button>`
+        : `<button class="btn-sm" onclick="attachAdapter('${escapeAttr(a.id)}', this)">${t("adapter_attach")}</button>`}
+    </div>`).join("");
+  sec.innerHTML = `<div class="panel-title" style="font-size:15px">🧩 ${t("adapters")}</div>${rows}`;
+}
+async function attachAdapter(id, btn) {
+  if (btn) { btn.disabled = true; btn.textContent = t("loading"); }
+  const r = await apiJson("/api/adapters/attach", { method: "POST", body: JSON.stringify({ path: id }) });
+  if (!r.ok) alert(r.reason || t("error"));
+  await refreshStatus(); loadModels();
+}
+async function detachAdapter() {
+  await apiJson("/api/adapters/detach", { method: "POST" });
+  await refreshStatus(); loadModels();
 }
 
 function addModelFormHtml() {

@@ -31,6 +31,7 @@ class Engine:
 
     def __init__(self) -> None:
         self.impl = None
+        self.adapter = None
         self._lock = threading.Lock()
 
     @property
@@ -63,7 +64,7 @@ class Engine:
             return "cpu"  # нет OV-варианта → torch на CPU из safetensors
         return best  # cuda | rocm | mps | cpu
 
-    def load(self, model_id: str) -> None:
+    def load(self, model_id: str, adapter: str | None = None) -> None:
         be = self.backend_for(model_id)
         with self._lock:
             if be == "openvino":
@@ -74,7 +75,24 @@ class Engine:
                 impl = TorchEngine(device_backend=be)
             impl.load(model_id)
             self.impl = impl
+            self.adapter = None
+            if adapter:
+                impl.load_adapter(adapter)
+                self.adapter = adapter
         _remember(model_id)
+
+    def attach_adapter(self, path: str) -> None:
+        if not self.impl:
+            raise RuntimeError("Сначала загрузите модель")
+        with self._lock:
+            self.impl.load_adapter(path)
+            self.adapter = path
+
+    def detach_adapter(self) -> None:
+        mid = self.model_id
+        self.adapter = None
+        if mid:
+            self.load(mid)  # перезагрузка базовой модели без адаптера
 
     def generate_stream(self, messages: list[dict], **kw) -> Iterator[str]:
         if not self.loaded:

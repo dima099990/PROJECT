@@ -24,5 +24,8 @@ class BaseEngine(ABC):
     @abstractmethod
     def generate_stream(self, messages: list[dict], **kw) -> Iterator[str]: ...
 
+    def load_adapter(self, path: str) -> None:
+        raise NotImplementedError("Адаптеры поддерживаются только torch-бэкендом")
+
     def unload(self) -> None:
         self.model_id = None
