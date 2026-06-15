@@ -67,6 +67,15 @@ def detect() -> dict:
             "backend": backend, "quant": quant}
 
 
+def _has_openvino() -> bool:
+    try:
+        import openvino  # noqa: F401
+        import openvino_genai  # noqa: F401
+        return True
+    except Exception:
+        return False
+
+
 def _choose(accels: list[dict]) -> tuple[str, str]:
     kinds = {a.get("backend") for a in accels}
     if "cuda" in kinds:
@@ -75,7 +84,10 @@ def _choose(accels: list[dict]) -> tuple[str, str]:
         return "rocm", "fp16"
     if "mps" in kinds:
         return "mps", "fp16"
+    # Intel NPU/iGPU — или CPU, если установлен OpenVINO (int4 экономит память)
     if any(a.get("device") in ("NPU", "GPU") for a in accels if a.get("backend") == "openvino"):
+        return "openvino", "int4-ov"
+    if _has_openvino():
         return "openvino", "int4-ov"
     return "cpu", "int8"
 

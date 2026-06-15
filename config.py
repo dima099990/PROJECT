@@ -45,6 +45,16 @@ DEFAULT_LANG = os.getenv("AI_LANG", "ru")  # ru | en
 #   hf_repo  -> оригинальные safetensors (обучение + инференс на CUDA/прочем)
 # Реестр сам выбирает формат под активный бэкенд (см. model_registry.resolve).
 MODEL_REGISTRY: dict[str, dict] = {
+    "qwen3-0.6b": {
+        "name": "Qwen3-0.6B",
+        "type": "hf",
+        "ov_repo": "",
+        "hf_repo": "Qwen/Qwen3-0.6B",
+        "quant": "fp16",
+        "size_gb": 1.5,
+        "trainable": True,
+        "note": "Очень лёгкая — для слабого железа (CPU/16 ГБ), работает сразу",
+    },
     "qwen3-8b": {
         "name": "Qwen3-8B",
         "type": "ov",
@@ -76,7 +86,7 @@ MODEL_REGISTRY: dict[str, dict] = {
         "note": "Код/тяжёлая: аренда GPU",
     },
 }
-DEFAULT_MODEL_ID = os.getenv("AI_DEFAULT_MODEL", "qwen3-8b")
+DEFAULT_MODEL_ID = os.getenv("AI_DEFAULT_MODEL", "qwen3-0.6b")  # лёгкая по умолчанию (ноут)
 
 
 def model_dir(model_id: str) -> Path:
@@ -98,6 +108,7 @@ INFERENCE = {
     "top_p": 0.9,
     "repeat_penalty": 1.1,
     "max_tokens": 1024,
+    "thinking": False,   # Qwen3 thinking-режим (выкл — прямые ответы, лучше для мелких)
     "auto_load": True,   # грузить активную/дефолтную модель при старте сервера
 }
 

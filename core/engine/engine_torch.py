@@ -47,26 +47,38 @@ class TorchEngine(BaseEngine):
         self.backend = f"torch/{be}"
         self.model_id = model_id
 
-    def _encode(self, messages: list[dict]):
-        try:
-            return self.tok.apply_chat_template(
-                messages, add_generation_prompt=True, return_tensors="pt")
-        except Exception:
-            text = "\n".join(f"{m['role']}: {m['content']}" for m in messages)
-            return self.tok(text, return_tensors="pt").input_ids
+    def _encode(self, messages: list[dict]) -> dict:
+        """Возвращает dict {input_ids[, attention_mask]} на устройстве модели."""
+        enc = None
+        for extra in ({"enable_thinking": config.INFERENCE.get("thinking", False)}, {}):
+            try:
+                enc = self.tok.apply_chat_template(
+                    messages, add_generation_prompt=True, return_tensors="pt",
+                    return_dict=True, **extra)
+                break
+            except Exception:
+                enc = None
+        if enc is None or not hasattr(enc, "keys"):
+            if enc is not None:  # вернулся голый тензор ids
+                enc = {"input_ids": enc}
+            else:
+                text = "\n".join(f"{m['role']}: {m['content']}" for m in messages)
+                enc = self.tok(text, return_tensors="pt")
+        return {k: v.to(self.model.device) for k, v in dict(enc).items()}
 
     def generate_stream(self, messages: list[dict], **kw) -> Iterator[str]:
         from transformers import TextIteratorStreamer
         self._stop = False
-        ids = self._encode(messages).to(self.model.device)
+        inputs = self._encode(messages)
         streamer = TextIteratorStreamer(self.tok, skip_prompt=True, skip_special_tokens=True)
         gen_kw = dict(
-            input_ids=ids, streamer=streamer,
+            **inputs, streamer=streamer,
             max_new_tokens=kw.get("max_tokens") or config.INFERENCE["max_tokens"],
             do_sample=True,
             temperature=config.INFERENCE["temperature"],
             top_p=config.INFERENCE["top_p"],
             repetition_penalty=config.INFERENCE.get("repeat_penalty", 1.1),
+            pad_token_id=self.tok.pad_token_id if self.tok.pad_token_id is not None else self.tok.eos_token_id,
         )
         th = threading.Thread(target=self.model.generate, kwargs=gen_kw, daemon=True)
         th.start()
