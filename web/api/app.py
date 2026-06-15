@@ -386,8 +386,11 @@ def agent_run(req: AgentRunReq):
     safety.log_action("agent_run", {"task": req.task[:200]})
 
     def gen():
-        for ev in agent_loop.run(req.task, max_steps=req.max_steps):
-            yield json.dumps(ev, ensure_ascii=False) + "\n"
+        try:
+            for ev in agent_loop.run(req.task, max_steps=req.max_steps):
+                yield json.dumps(ev, ensure_ascii=False) + "\n"
+        except Exception as e:
+            yield json.dumps({"type": "error", "error": str(e)}, ensure_ascii=False) + "\n"
 
     return StreamingResponse(gen(), media_type="application/x-ndjson",
                              headers={"X-Accel-Buffering": "no"})

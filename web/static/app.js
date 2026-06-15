@@ -965,6 +965,7 @@ function renderAgentEvent(ev) {
   if (ev.type === "tool") return `<div class="ag-ev ag-tool">${t("agent_tool")}: <b>${escapeText(ev.name)}</b> <code>${escapeText(JSON.stringify(ev.args))}</code></div>`;
   if (ev.type === "result") { const s = JSON.stringify(ev.result).slice(0, 1500); return `<div class="ag-ev ag-result">${t("agent_result")}: <code>${escapeText(s)}</code></div>`; }
   if (ev.type === "final") return `<div class="ag-ev ag-final">${t("agent_final")}: <div class="answer">${mdToHtml(ev.text || "")}</div></div>`;
+  if (ev.type === "error") return `<div class="ag-ev ag-result" style="border-left-color:#f87171;color:#fca5a5">⚠️ ${escapeText(ev.error || t("error"))}</div>`;
   if (ev.type === "stopped") return `<div class="ag-ev ag-final">${t("agent_stopped")}</div>`;
   return "";
 }

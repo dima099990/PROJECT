@@ -88,29 +88,38 @@ def run(task: str, max_steps: int = 8,
         if safety.stop_requested():
             yield {"type": "stopped", "step": step}
             return
-        out = gen(messages)
+        try:
+            out = gen(messages)
+        except Exception as e:
+            yield {"type": "error", "step": step, "error": f"генерация: {e}"}
+            return
         calls = parse_tool_calls(out)
         if not calls:
             yield {"type": "final", "step": step, "text": out}
             return
-        # убрать tool_call-разметку из видимой мысли
-        thought = re.sub(r"<tool_call>.*?</tool_call>", "", out, flags=re.S).strip()
+        # убрать tool_call-разметку из видимой мысли (в т.ч. без закрывающего тега)
+        thought = re.sub(r"<tool[_\s]?call>.*?(?:</tool[_\s]?call>|$)", "", out, flags=re.S | re.I).strip()
         if thought:
             yield {"type": "thought", "step": step, "text": thought}
         messages.append({"role": "assistant", "content": out})
         for call in calls:
             raw_name = call.get("name")
-            resolved = resolve_tool_name(raw_name)
+            name = resolve_tool_name(raw_name)
             args = call.get("arguments") or call.get("args") or {}
             if isinstance(args, str):
                 try:
                     args = json.loads(args)
                 except Exception:
                     args = {}
-            fn = tools.REGISTRY.get(resolved) if resolved else None
-            yield {"type": "tool", "step": step, "name": resolved or raw_name, "args": args}
-            res = fn(**args) if fn else {"ok": False, "error": f"неизвестный инструмент {raw_name}"}
-            yield {"type": "result", "step": step, "name": name, "result": res}
+            if not isinstance(args, dict):
+                args = {}
+            fn = tools.REGISTRY.get(name) if name else None
+            yield {"type": "tool", "step": step, "name": name or raw_name, "args": args}
+            try:
+                res = fn(**args) if fn else {"ok": False, "error": f"неизвестный инструмент {raw_name}"}
+            except Exception as e:
+                res = {"ok": False, "error": str(e)}
+            yield {"type": "result", "step": step, "name": name or raw_name, "result": res}
             messages.append({"role": "tool",
                              "content": json.dumps(res, ensure_ascii=False)[:4000]})
     yield {"type": "final", "step": max_steps, "text": "Достигнут лимит шагов."}
