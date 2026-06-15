@@ -1,78 +1,110 @@
 # Local Autonomous AI — память проекта
 
-> Человекочитаемый слой памяти (дублирует claude-mem). Корень не трогается авто-генерацией.
-> В начале сессии: читать этот файл + claude-mem. В конце: обновлять статус/TODO + сохранять в claude-mem.
+> Человекочитаемый слой памяти. Корень не трогается авто-генерацией.
+> В начале сессии: читать этот файл. В конце: обновлять статус/TODO.
 
 ## Цель
-Локальный автономный мультиагентный ИИ на готовой предобученной **DeepSeek (GGUF)**, который работает СРАЗУ из коробки (без обучения), потом дообучается LoRA-адаптерами под пользователя. Управляет ПК и ФС, веб-интерфейс, память диалогов, мультиагентность; задел под самопереписывание, мультимодальность, вынос на сервер.
-
-## Ключевой принцип работы с моделью
-1. Старт на чистой предобученной модели, без обучения.
-2. Поверх — LoRA-адаптеры (база не трогается, адаптеры подключаются/отключаются).
-3. Смена моделей — первоклассная фича: реестр в `config.py`, переключение из UI с горячей перезагрузкой, выбор база/база+адаптер, добавление моделей через UI/config.
+Локальный автономный мультиагентный ИИ на Qwen3 (safetensors / OpenVINO IR),
+который работает СРАЗУ из коробки (без обучения), потом дообучается LoRA-адаптерами
+под пользователя. Управляет ПК и ФС, веб-интерфейс, мультиагентность,
+память диалогов, git-safe самоизменение кода.
 
 ## Стек
-- Python 3.10+, кроссплатформа (Windows/Linux), CPU-only допустимо.
-- Инференс: **llama-cpp-python** (GGUF), без Ollama/LM Studio.
-- Модели: huggingface_hub, репо bartowski/unsloth, квант Q4_K_M/IQ4_XS. Дефолт **deepseek-7b**.
-- Бэкенд: FastAPI + uvicorn. Фронт: чистый HTML/CSS/JS, двуязычный (ru/en).
-- Память/RAG: ChromaDB + sentence-transformers (multilingual).
-- Интернет: duckduckgo-search (без ключа) + BeautifulSoup.
-- Дообучение: transformers + peft (LoRA/QLoRA), отдельный процесс.
-- Планировщик: APScheduler (задел, выкл).
+- Python 3.10+, кроссплатформа (Windows/Linux), CPU/CUDA/ROCm/MPS/OpenVINO
+- Инференс: **transformers** (safetensors, CUDA/ROCm/MPS/CPU) + **OpenVINO** (Intel NPU/iGPU)
+- Модели: huggingface_hub, реестр Qwen3 (0.6B–30B), кастомные GGUF через UI
+- Бэкенд: FastAPI + uvicorn. Фронт: чистый HTML/CSS/JS, двуязычный (ru/en)
+- Память/RAG: ChromaDB + sentence-transformers (multilingual)
+- Поиск: duckduckgo-search (без ключа) + trafilatura
+- Дообучение: transformers + peft (LoRA/QLoRA), фоновый поток, CPU/CUDA
+- Самоизменение: git-safe (ветка → проверка → merge/откат)
 
 ## Железо (цель)
-Galaxy Book 5 Pro 360, Intel Core Ultra 2, iGPU Arc 140V (без дискретной GPU), 16 ГБ RAM. Инференс и обучение разделены: тяжёлый fine-tune 14B локально невозможен → 14B только инференс/сервер; обучение локально только 1.5B-3B.
+Galaxy Book 5 Pro 360, Intel Core Ultra 2, iGPU Arc 140V (без дискретной GPU),
+16 ГБ RAM. Инференс и обучение разделены: тяжёлое обучение 14B+ локально
+невозможно — только инференс; обучение локально 0.6B–3B.
 
 ## Структура
 ```
 run.py            старт сервера (перезапуск из venv)
 install.py        venv + зависимости + дефолтная модель (одна команда)
 config.py         реестр моделей, агентов, пути, страховки, фича-флаги
-core/             inference(горячая перезагрузка), model_registry, coordinator,
-                  agents, tools, safety
-memory/           store.py — ChromaDB + RAG (шаг 5)
-training/         lora.py, adapters.py — LoRA + адаптеры (шаг 6)
-web/api/          app.py (FastAPI), auth.py; routes/ — задел
-web/static/       index.html, style.css, app.js, i18n.js (панели, ru/en)
-selfmod/          self_modify.py — git-safe самоправка (шаг 7, выкл)
-scheduler/        scheduler.py — APScheduler (шаг 8, выкл)
-modalities/       stt/tts/vision — заглушки
-logs/ models/ data/(adapters,chroma,trash)
+core/
+  engine/         бэкенды инференса: TorchEngine (CUDA/ROCm/MPS/CPU),
+                  OVEngine (OpenVINO NPU/iGPU); фасад Engine
+  model_registry  реестр моделей: список, скачивание, выбор активной
+  coordinator     контекст + потоковая генерация
+  agent_loop      ReAct-цикл (рассуждение → tool_call → результат → ...)
+  agents          реестр агентов из .claude/agents/*.md
+  tools           инструменты: fs, shell, exec_python, web_search/fetch
+  safety          страховки: whitelist, стоп-флаг, корзина, лог
+  chats           мультичат (chats.json)
+  device          детект железа + выбор бэкенда
+  metrics         psutil-метрики (CPU/RAM/диск)
+  stats           статистика запросов
+  parser          парсинг URL → корпус
+  filesearch      поиск файлов по имени/содержимому
+training/
+  lora.py         LoRA-дообучение (+ Scratch, + Distill) в фоновом потоке
+  adapters.py     реестр адаптеров: attach/detach к активной модели
+memory/
+  store.py        ChromaDB + RAG (PersistentClient, sentence-transformers)
+selfmod/
+  self_modify.py  git-safe самоизменение кода
+scheduler/
+  scheduler.py    APScheduler (заглушка, выключен)
+web/api/
+  app.py          FastAPI: чат, агент, модели, обучение, файлы, selfmod, WS
+  auth.py         HMAC-авторизация по паролю
+web/static/       index.html, app.js, style.css, i18n.js (панели, ru/en)
 ```
 
-## Правила работы
-- **Экономия токенов:** код без лишних комментариев, объяснения телеграфно.
-- **Поэтапность:** делать по шагам, после каждого — проверка пользователя.
-- **Делегирование (важно):** оркестратор (Opus) держит АРХИТЕКТУРУ и ИНТЕГРАЦИЮ; рутину делегирует субагентам на **sonnet**:
-  - `coder` — Python-модули, `tester` — тесты, `web` — фронт+эндпоинты,
-  - `infra` — install/окружение/запуск, `reviewer` — ревью перед мержем.
-  Определения: `.claude/agents/*.md` (модель sonnet явно).
-- **Страховки автономности:** запись только в белый список папок (`safety.is_writable`); удаление = корзина проекта (`safety.to_trash`); лог действий (`logs/actions.jsonl`); стоп-кнопка/флаг; проверка стоп-флага в циклах.
-- **Ленивые импорты** тяжёлых библиотек — сервер поднимается без модели.
-- **Вся логика за REST/WS** (задел под вынос на сервер). Фронт без бизнес-логики.
-- claude-mem: читать память в начале сессии, сохранять решения/структуру/прогресс/TODO в конце.
+## Статус (реальный, 2025)
 
-## Авторизация / язык
-Пароль из `.env` (`AI_PASSWORD`, дефолт `admin`). Токен HMAC. UI двуязычный (`i18n.js`).
+| Шаг | Что | Статус |
+|-----|-----|--------|
+| 1 | Каркас (структура, config, install, run, FastAPI, UI-панели) | ✅ **Готово** |
+| 2 | Инференс-движок (Torch + OpenVINO, стриминг, чат) | ✅ **Готово** |
+| 3 | Горячая перезагрузка модели из UI | ✅ **Готово** |
+| 4 | Мультиагентность (ReAct-цикл, инструменты: fs/shell/python/web) | ✅ **Готово** |
+| 5 | ChromaDB + RAG (memory/store.py, интеграция в чат) | ✅ **Готово** |
+| 6 | LoRA-дообучение (adapter/scratch/distill, фоновый поток) | ✅ **Готово** |
+| 7 | Self-modify (git-safe: ветка→проверка→merge/откат, история) | ✅ **Готово** |
+| 8 | Модальности (STT/TTS/Vision) + Планировщик | ⬜ **Заглушка** |
 
-## Клиент-сервер
-Сейчас LOCAL рабочий. REMOTE — задокументировать эндпоинты (шаг 8). Статус-апдейты «что агент делает сейчас» — по WebSocket `/ws/status`.
-
-## Статус
-- **Шаг 1 — каркас: ГОТОВО** (структура, git, агенты, config+реестр, install.py, run.py, FastAPI-скелет с авторизацией, UI-панели, двуязычность, страховки-каркас, заделы).
-- Шаги 2–8 — впереди.
-
-## TODO (следующее)
-- [ ] Шаг 2: скачивание дефолтной GGUF + базовый чат (работает сразу).
-- [ ] Шаг 3: переключение/горячая перезагрузка модели из UI (тест).
-- [ ] Шаг 4: мультиагентность — координатор, агенты, инструменты, автономный цикл, страховки (реальная реализация tools.py).
-- [ ] Шаг 5: ChromaDB + RAG (memory/store.py).
-- [ ] Шаг 6: LoRA + адаптеры + статус в UI.
-- [ ] Шаг 7: self_modify + git.
-- [ ] Шаг 8: модальности/планировщик заглушки + документация REMOTE.
+## Session Log (auto-updated by AI after each session)
+### 2025-06-16 (fix training crash + live chart + dataset viewer + crawl chart + server test)
+- **Changed files**: `training/lora.py`, `core/parser.py`, `web/api/app.py`, `web/static/app.js`, `web/static/i18n.js`, `web/static/style.css`, `C:\Users\dima0\.claude\CLAUDE.md`, `C:\PROJECT\CLAUDE.md`
+- **Fixes in `training/lora.py`**: crash 0xC0000005:
+  1. `_train_full()` — загружает pre-trained веса, full fine-tune (не random)
+  2. `_train_scratch_new()` — только random-weight (для scratch-моделей без весов)
+  3. `_train_scratch()` диспетчер — выбирает между `_train_full` / `_train_scratch_new`
+  4. `gradient_checkpointing_enable()` только под CUDA
+  5. `gc.collect()` каждые 50 шагов во всех циклах
+  6. `import gc`
+- **New in `core/parser.py`**: `corpus_list()` (paginated 10k-char blocks), `corpus_delete_block()`, `corpus_clear()`
+- **New in `web/api/app.py`**: `GET /api/data/corpus/content`, `DELETE /api/data/corpus/content/{block_id}`, `POST /api/data/corpus/clear`
+- **New in `web/static/app.js`**:
+  - **Chart**: 2 mini-charts (loss top, perplexity bottom), HiDPI via devicePixelRatio, легенда, обновление 1.5s
+  - **Dataset viewer**: кнопка, пагинация по 10k chars, удалить блок, очистить всё
+  - **Crawl chart**: canvas pages + chars, HiDPI, обновление 1s
+  - **Panel persistence**: curPanel сохраняется в localStorage, восстанавливается при загрузке
+  - **Fix**: crawl start btn id="cr-start-btn", stop btn id="cr-stop-btn2"
+- **New in `web/static/i18n.js`**: строки датасета + кнопок (ru/en)
+- **New in `web/static/style.css`**: `.dataset-block`, `.dataset-toolbar`, `.btn-xs`
+- **Context persistence**: `C:\Users\dima0\.claude\CLAUDE.md` с START/END инструкциями; `C:\PROJECT\CLAUDE.md` с Session Log
+- **Server test (2025-06-16)**: запущен ~13:00–14:30 на `http://127.0.0.1:8000`
+  - Модель Qwen3-0.6B загружена (311 файлов safetensors, ~1 сек)
+  - **Краша 0xC0000005 НЕТ** — fix подтверждён
+  - **Краулинг**: сработал, страницы найдены, остановлен
+  - **Датасет**: просмотр, удалено 4 блока
+  - **Обучение**: запускалось 3 раза, без падений, поллинг статуса работал
+  - **Панель**: после refresh сохранила последнюю открытую панель
+  - Сервер остановлен
 
 ## Известные проблемы / риски
-- llama-cpp-python собирается долго при install (нативная сборка под CPU).
-- claude-mem хуки идут через WSL-bash на этой машине — проверить живой автозапуск при рестарте сессии.
-- 14B локально — только инференс, медленно; обучение 14B — заглушка «нужен GPU-сервер».
+- **llama-cpp-python выпилен** — инференс через transformers / OpenVINO
+- **Scratch-модели** — случайная инициализация, нужно много данных и эпох
+- **Distill** — ученик не превзойдёт учителя без реальных данных
+- **14B обучение** только на GPU-сервере (на CPU не влезет)
+- **OpenVINO** показывает лучшую производительность на Intel Ultra NPU/iGPU

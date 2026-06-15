@@ -23,6 +23,8 @@ data/active_model.txt
 data/custom_models.json
 data/stats.json
 data/settings.json
+data/parse_history.json
+data/session_history.md
 data/corpus/
 
 # Логи

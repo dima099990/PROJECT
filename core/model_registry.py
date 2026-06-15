@@ -98,7 +98,7 @@ def _slug(s: str) -> str:
 def add_model(spec: dict) -> str:
     """Добавить свою GGUF-модель из UI. spec: name, repo, filename, [quant, size_gb, note].
     Персистится и переживает перезапуск. Возвращает id."""
-    mid = spec.get("id") or _slug(spec.get("name") or spec["filename"].replace(".gguf", ""))
+    mid = spec.get("id") or _slug(spec.get("name") or (spec.get("filename") or "").replace(".gguf", ""))
     base = mid
     i = 2
     while mid in config.MODEL_REGISTRY and mid not in _load_custom():
@@ -110,9 +110,33 @@ def add_model(spec: dict) -> str:
     entry["note"] = spec.get("note", "")
     entry["source"] = "custom"
     entry.pop("id", None)
+    if "arch" in entry:
+        arch = entry["arch"]
+        n_embd = int(arch.get("n_embd", 0))
+        n_heads = int(arch.get("n_heads", 1))
+        if n_embd > 0 and n_embd % n_heads != 0:
+            raise ValueError(f"Размерность {n_embd} не кратна числу голов {n_heads}. "
+                             f"Укажите n_embd, кратный n_heads (например, n_heads={n_embd // (n_embd // n_heads)}).")
     config.MODEL_REGISTRY[mid] = entry
     custom = _load_custom(); custom[mid] = entry; _save_custom(custom)
     return mid
+
+
+def update_model(model_id: str, updates: dict) -> bool:
+    """Обновить метаданные модели (name, note, quant, size_gb, trainable)."""
+    if model_id not in config.MODEL_REGISTRY:
+        return False
+    entry = config.MODEL_REGISTRY[model_id]
+    for key in ("name", "note", "quant", "size_gb", "trainable"):
+        if key in updates:
+            entry[key] = updates[key]
+    custom = _load_custom()
+    if model_id in custom:
+        for key in ("name", "note", "quant", "size_gb", "trainable"):
+            if key in updates:
+                custom[model_id][key] = updates[key]
+        _save_custom(custom)
+    return True
 
 
 def remove_model(model_id: str) -> bool:

@@ -87,6 +87,23 @@ MODEL_REGISTRY: dict[str, dict] = {
     },
 }
 DEFAULT_MODEL_ID = os.getenv("AI_DEFAULT_MODEL", "qwen3-0.6b")  # лёгкая по умолчанию (ноут)
+ACTIVE_MODEL_FILE = DATA_DIR / "active_model.txt"
+
+
+def save_active_model(model_id: str) -> None:
+    DATA_DIR.mkdir(parents=True, exist_ok=True)
+    ACTIVE_MODEL_FILE.write_text(model_id.strip(), encoding="utf-8")
+
+
+def load_active_model() -> str | None:
+    if ACTIVE_MODEL_FILE.exists():
+        try:
+            mid = ACTIVE_MODEL_FILE.read_text(encoding="utf-8").strip()
+            if mid in MODEL_REGISTRY:
+                return mid
+        except Exception:
+            pass
+    return None
 
 
 def model_dir(model_id: str) -> Path:

@@ -1,6 +1,5 @@
-"""Torch-бэкенд (transformers): CUDA / ROCm / MPS / CPU. Инференс от safetensors.
-Потоковый вывод потокенно через TextIteratorStreamer + поток генерации."""
 from __future__ import annotations
+import gc
 import threading
 from typing import Iterator
 
@@ -16,6 +15,7 @@ class TorchEngine(BaseEngine):
         self.device_backend = device_backend
         self.model = None
         self.tok = None
+        self._is_peft = False
 
     def load(self, model_id: str) -> None:
         import torch
@@ -23,8 +23,9 @@ class TorchEngine(BaseEngine):
         from core import model_registry
 
         path = str(model_registry.ensure_model(model_id, backend=self.device_backend))
-        kw: dict = {}
+        kw: dict = {"trust_remote_code": True}
         be = self.device_backend
+
         if be == "cuda":
             try:
                 from transformers import BitsAndBytesConfig
@@ -37,26 +38,41 @@ class TorchEngine(BaseEngine):
         elif be in ("rocm", "mps"):
             kw["torch_dtype"] = torch.float16
             kw["device_map"] = "auto"
-        else:  # cpu
+        else:
             kw["torch_dtype"] = torch.float32
 
-        self.tok = AutoTokenizer.from_pretrained(path)
+        self.tok = AutoTokenizer.from_pretrained(path, trust_remote_code=True)
+        if self.tok.pad_token is None:
+            self.tok.pad_token = self.tok.eos_token
+
         self.model = AutoModelForCausalLM.from_pretrained(path, **kw)
         if be == "cpu":
             self.model.to("cpu")
+
+        self.model.eval()
+        self._is_peft = False
         self.backend = f"torch/{be}"
         self.model_id = model_id
 
     def load_adapter(self, path: str) -> None:
-        """Подключить LoRA-адаптер поверх базовой модели (peft)."""
         from peft import PeftModel
         self.model = PeftModel.from_pretrained(self.model, path)
         self.model.eval()
+        self._is_peft = True
+
+    def detach_adapter(self) -> None:
+        if self._is_peft and self.model_id:
+            mid = self.model_id
+            self.unload()
+            self.load(mid)
 
     def _encode(self, messages: list[dict]) -> dict:
-        """Возвращает dict {input_ids[, attention_mask]} на устройстве модели."""
+        import torch
         enc = None
-        for extra in ({"enable_thinking": config.INFERENCE.get("thinking", False)}, {}):
+        for extra in (
+            {"enable_thinking": config.INFERENCE.get("thinking", False)},
+            {},
+        ):
             try:
                 enc = self.tok.apply_chat_template(
                     messages, add_generation_prompt=True, return_tensors="pt",
@@ -65,7 +81,7 @@ class TorchEngine(BaseEngine):
             except Exception:
                 enc = None
         if enc is None or not hasattr(enc, "keys"):
-            if enc is not None:  # вернулся голый тензор ids
+            if enc is not None:
                 enc = {"input_ids": enc}
             else:
                 text = "\n".join(f"{m['role']}: {m['content']}" for m in messages)
@@ -76,7 +92,8 @@ class TorchEngine(BaseEngine):
         from transformers import TextIteratorStreamer
         self._stop = False
         inputs = self._encode(messages)
-        streamer = TextIteratorStreamer(self.tok, skip_prompt=True, skip_special_tokens=True)
+        streamer = TextIteratorStreamer(self.tok, skip_prompt=True,
+                                        skip_special_tokens=True)
         gen_kw = dict(
             **inputs, streamer=streamer,
             max_new_tokens=kw.get("max_tokens") or config.INFERENCE["max_tokens"],
@@ -84,7 +101,8 @@ class TorchEngine(BaseEngine):
             temperature=config.INFERENCE["temperature"],
             top_p=config.INFERENCE["top_p"],
             repetition_penalty=config.INFERENCE.get("repeat_penalty", 1.1),
-            pad_token_id=self.tok.pad_token_id if self.tok.pad_token_id is not None else self.tok.eos_token_id,
+            pad_token_id=(self.tok.pad_token_id if self.tok.pad_token_id is not None
+                          else self.tok.eos_token_id),
         )
         th = threading.Thread(target=self.model.generate, kwargs=gen_kw, daemon=True)
         th.start()
@@ -98,9 +116,10 @@ class TorchEngine(BaseEngine):
         self.model = None
         self.tok = None
         self.model_id = None
+        self._is_peft = False
+        gc.collect()
         try:
-            import torch, gc
-            gc.collect()
+            import torch
             if torch.cuda.is_available():
                 torch.cuda.empty_cache()
         except Exception:

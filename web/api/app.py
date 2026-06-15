@@ -17,7 +17,7 @@ from logging.handlers import RotatingFileHandler
 import config
 from core import agentmgr, chats, coordinator, metrics, model_registry, parser, safety, stats
 from core.engine import engine
-from training import adapters, lora
+from training import lora
 from web.api.auth import check_password, issue_token, require_auth
 
 STATIC = Path(__file__).resolve().parent.parent / "static"
@@ -63,6 +63,13 @@ class MsgReq(BaseModel):
 class TitleReq(BaseModel):
     title: str
 
+class ModelUpdateReq(BaseModel):
+    name: str | None = None
+    note: str | None = None
+    quant: str | None = None
+    size_gb: float | None = None
+    trainable: bool | None = None
+
 class AddModelReq(BaseModel):
     name: str
     repo: str
@@ -81,6 +88,11 @@ class AgentReq(BaseModel):
 
 class ParseReq(BaseModel):
     urls: list[str]
+
+class ParseCrawlReq(BaseModel):
+    url: str
+    depth: int = 2
+    max_pages: int = 50
 
 class ScratchReq(BaseModel):
     name: str
@@ -129,9 +141,10 @@ class AgentRunReq(BaseModel):
 
 class TrainReq(BaseModel):
     model_id: str
-    mode: str = "adapter"          # adapter | scratch | distill
+    mode: str = "scratch"          # scratch | distill
     teacher_id: str | None = None
     epochs: int = 1
+    force: bool = False            # игнорировать предупреждения о нехватке RAM
 
 
 # --- Авторизация ---
@@ -149,7 +162,7 @@ def status():
         "deploy_mode": config.DEPLOY_MODE,
         "model_loaded": engine.loaded,
         "active_model": engine.model_id,
-        "active_adapter": adapters.active_adapter,
+
         "training": lora.status,
         "stop_flag": safety.stop_requested(),
         "features": config.FEATURES,
@@ -164,10 +177,15 @@ def models():
 @app.post("/api/models/load", dependencies=[Depends(require_auth)])
 def models_load(req: ModelReq):
     try:
-        engine.load(req.model_id)  # качает при необходимости + грузит
+        engine.load(req.model_id)
+        config.save_active_model(req.model_id)
         return {"ok": True, "active": engine.model_id}
     except Exception as e:
         return JSONResponse({"ok": False, "reason": str(e)}, status_code=400)
+
+@app.get("/api/models/active", dependencies=[Depends(require_auth)])
+def models_active_get():
+    return {"active": config.load_active_model()}
 
 @app.get("/api/models/repo_files", dependencies=[Depends(require_auth)])
 def models_repo_files(repo: str):
@@ -183,6 +201,14 @@ def models_add(req: AddModelReq):
         return {"ok": True, "id": mid}
     except Exception as e:
         return JSONResponse({"ok": False, "reason": str(e)}, status_code=400)
+
+@app.put("/api/models/{model_id}", dependencies=[Depends(require_auth)])
+def models_update(model_id: str, req: ModelUpdateReq):
+    updates = {k: v for k, v in req.model_dump().items() if v is not None}
+    if not updates:
+        return {"ok": False, "reason": "нет полей для обновления"}
+    ok = model_registry.update_model(model_id, updates)
+    return {"ok": ok, "reason": None if ok else "модель не найдена"}
 
 @app.delete("/api/models/{model_id}", dependencies=[Depends(require_auth)])
 def models_remove(model_id: str):
@@ -246,25 +272,48 @@ def stats_get():
 # --- Данные: парсинг сайтов в корпус (панель «Обучение») ---
 @app.post("/api/data/parse", dependencies=[Depends(require_auth)])
 def data_parse(req: ParseReq):
-    return parser.collect(req.urls)
+    result = parser.collect(req.urls)
+    parser.record_parse_stats(result)
+    return result
+
+@app.post("/api/data/parse/crawl", dependencies=[Depends(require_auth)])
+def data_parse_crawl_start(req: ParseCrawlReq):
+    return parser.start_crawl(req.url, depth=req.depth, max_pages=req.max_pages)
+
+@app.get("/api/data/parse/crawl", dependencies=[Depends(require_auth)])
+def data_parse_crawl_status():
+    st = parser.get_crawl_status()
+    if st["state"] in ("done", "stopped"):
+        parser.record_parse_stats(st)
+    return st
+
+@app.post("/api/data/parse/crawl/stop", dependencies=[Depends(require_auth)])
+def data_parse_crawl_stop():
+    st = parser.stop_crawl()
+    parser.record_parse_stats(parser.get_crawl_status())
+    return st
+
+@app.get("/api/data/parse/history", dependencies=[Depends(require_auth)])
+def data_parse_history():
+    return {"history": parser.parse_history()}
 
 @app.get("/api/data/corpus", dependencies=[Depends(require_auth)])
 def data_corpus():
     return parser.corpus_stats()
 
+@app.get("/api/data/corpus/content", dependencies=[Depends(require_auth)])
+def data_corpus_content(page: int = 1, per_page: int = 10):
+    return parser.corpus_list(page=page, per_page=per_page)
 
-# --- Адаптеры (LoRA) ---
-@app.get("/api/adapters", dependencies=[Depends(require_auth)])
-def adapters_list():
-    return {"adapters": adapters.list_adapters(), "active": adapters.active_adapter}
+@app.delete("/api/data/corpus/content/{block_id}", dependencies=[Depends(require_auth)])
+def data_corpus_delete(block_id: str):
+    ok = parser.corpus_delete_block(block_id)
+    return {"ok": ok}
 
-@app.post("/api/adapters/attach", dependencies=[Depends(require_auth)])
-def adapters_attach(req: PathReq):
-    return adapters.attach(req.path)  # path = adapter_id
-
-@app.post("/api/adapters/detach", dependencies=[Depends(require_auth)])
-def adapters_detach():
-    return adapters.detach()
+@app.post("/api/data/corpus/clear", dependencies=[Depends(require_auth)])
+def data_corpus_clear():
+    ok = parser.corpus_clear()
+    return {"ok": ok}
 
 
 # --- Чаты (несколько диалогов) ---
@@ -446,7 +495,8 @@ def safety_resume():
 # --- Обучение LoRA без GPU (фоновый поток) ---
 @app.post("/api/training/start", dependencies=[Depends(require_auth)])
 def training_start(req: TrainReq):
-    return lora.start_training(req.model_id, mode=req.mode, teacher_id=req.teacher_id, epochs=req.epochs)
+    return lora.start_training(req.model_id, mode=req.mode, teacher_id=req.teacher_id,
+                                epochs=req.epochs, force=req.force)
 
 @app.get("/api/training/status", dependencies=[Depends(require_auth)])
 def training_status():
@@ -455,6 +505,17 @@ def training_status():
 @app.post("/api/training/stop", dependencies=[Depends(require_auth)])
 def training_stop():
     return lora.stop_training()
+
+@app.get("/api/training/history", dependencies=[Depends(require_auth)])
+def training_history():
+    f = config.DATA_DIR / "training_history.json"
+    if f.exists():
+        try:
+            import json
+            return {"history": json.loads(f.read_text(encoding="utf-8"))}
+        except Exception:
+            pass
+    return {"history": []}
 
 
 # --- Самоизменение кода (git-safe) ---

@@ -546,11 +546,9 @@ canvas.metric-canvas { width: 100%; height: 80px; display: block; }
   margin-top: 4px;
 }
 
-/* ===== ADAPTERS ===== */
-.adapter-section-title {
-  font-size: 13px; color: #9ca3af; font-weight: 600;
-  margin: 16px 0 8px;
-}
+/* ===== MODELS LIST ===== */
+.models-list { display: flex; flex-direction: column; gap: 8px; }
+.amt-group { display: flex; flex-direction: column; gap: 6px; }
 
 /* ===== ШРИФТЫ: разные слои визуально различаются ===== */
 /* UI — системный sans (body). Ответ ассистента — читаемый serif. */
@@ -712,10 +710,94 @@ canvas.metric-canvas { width: 100%; height: 80px; display: block; }
 /* ===== TRAINING PANEL (redesigned) ===== */
 .training-section {
   background: #151820; border: 1px solid #1e2230;
-  border-radius: 12px; padding: 16px; margin-bottom: 14px;
+  border-radius: 12px; padding: 18px; margin-bottom: 14px;
 }
 .training-section-title {
-  font-size: 14px; font-weight: 600; color: #e1e4eb; margin-bottom: 12px;
+  font-size: 14px; font-weight: 600; color: #e1e4eb; margin-bottom: 14px;
+}
+.training-note-text {
+  font-size: 11px; color: #4b5563; margin-top: 10px; font-style: italic;
+  line-height: 1.5;
+}
+/* dataset row */
+.train-dataset-row {
+  display: flex; gap: 16px; flex-wrap: wrap; align-items: center;
+  font-size: 13px; color: #9ca3af;
+}
+.train-dataset-row strong { color: #e1e4eb; }
+/* training grid */
+.train-grid {
+  display: grid; grid-template-columns: 1fr 1fr; gap: 12px;
+}
+.train-field {
+  display: flex; flex-direction: column; gap: 5px;
+  min-width: 0;
+}
+.train-field label {
+  font-size: 11px; color: #6b7280; font-weight: 500;
+  text-transform: uppercase; letter-spacing: .04em;
+  line-height: 1.3;
+}
+.train-select {
+  width: 100%; padding: 8px 32px 8px 11px; border-radius: 8px; box-sizing: border-box;
+  border: 1px solid #2a2f3e; background: #0d0f14; color: #e1e4eb;
+  outline: none; font-size: 13px; cursor: pointer;
+  transition: border-color .15s;
+  appearance: none; -webkit-appearance: none; -moz-appearance: none;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6'%3E%3Cpath d='M0 0l5 6 5-6z' fill='%236b7280'/%3E%3C/svg%3E");
+  background-repeat: no-repeat; background-position: right 10px center;
+  background-size: 10px 6px;
+}
+.train-select:focus { border-color: #5865f2; }
+.train-select option { background: #151820; color: #e1e4eb; padding: 6px; }
+.train-num {
+  width: 100%; padding: 8px 11px; border-radius: 8px; box-sizing: border-box;
+  border: 1px solid #2a2f3e; background: #0d0f14; color: #e1e4eb;
+  outline: none; font-size: 13px;
+  transition: border-color .15s;
+  appearance: none; -webkit-appearance: none; -moz-appearance: none;
+}
+.train-num:focus { border-color: #5865f2; }
+/* remove spinner on number inputs */
+.train-num::-webkit-outer-spin-button,
+.train-num::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
+.train-num[type=number] { -moz-appearance: textfield; }
+/* buttons row in grid */
+.train-field.buttons-row {
+  display: flex; align-items: flex-end; gap: 8px;
+  justify-content: flex-end;
+}
+/* training status */
+.train-status { margin-top: 14px; }
+.train-progress-wrap {
+  width: 100%; height: 6px; background: #1a1d27;
+  border-radius: 3px; overflow: hidden; margin: 4px 0;
+}
+.train-progress-bar {
+  height: 100%; background: linear-gradient(90deg, #5865f2, #7c8cf8);
+  border-radius: 3px; transition: width .3s;
+}
+.train-metrics {
+  display: flex; gap: 14px; flex-wrap: wrap;
+  font-size: 12px; color: #9ca3af; margin: 8px 0;
+  background: #0d0f14; border: 1px solid #1e2230;
+  border-radius: 8px; padding: 10px 14px;
+}
+.train-metric { white-space: nowrap; }
+.train-metric b { color: #e1e4eb; }
+.train-loss-chart {
+  width: 100%; height: auto; max-height: 150px; margin-top: 8px;
+  display: block; background: #0d0f14; border: 1px solid #1e2230;
+  border-radius: 8px;
+}
+/* data panel */
+.train-data-panel {
+  background: #0f1219; border: 1px solid #252a38;
+  border-radius: 10px; padding: 14px; margin: 12px 0;
+}
+.train-data-row { display: flex; gap: 10px; align-items: flex-start; }
+.train-data-actions {
+  display: flex; flex-direction: column; gap: 6px; flex-shrink: 0;
 }
 .training-textarea {
   width: 100%; padding: 8px 11px; border-radius: 8px;
@@ -724,33 +806,58 @@ canvas.metric-canvas { width: 100%; height: 80px; display: block; }
   font-family: inherit;
 }
 .training-textarea:focus { border-color: #5865f2; }
-.training-corpus-row {
-  display: flex; gap: 16px; flex-wrap: wrap; margin-top: 8px;
-}
-.training-corpus-item {
-  font-size: 12px; color: #9ca3af;
-}
-.training-corpus-item strong { color: #e1e4eb; }
 .training-parse-result {
-  margin-top: 10px; padding: 8px 12px; border-radius: 8px;
+  margin-top: 10px; padding: 10px 14px; border-radius: 8px;
   background: #0d0f14; border: 1px solid #252a38;
-  font-size: 12px; color: #9ca3af;
+  font-size: 12px; color: #9ca3af; max-height: 200px; overflow-y: auto;
 }
 .training-parse-result .ok { color: #4ade80; }
 .training-parse-result .err-line { color: #f87171; }
-.training-select {
-  width: 100%; padding: 8px 11px; border-radius: 8px;
-  border: 1px solid #2a2f3e; background: #0d0f14; color: #e1e4eb;
-  outline: none; font-size: 13px; margin-bottom: 10px;
+/* dataset viewer */
+.dataset-block {
+  background: #0d0f14; border: 1px solid #1e2230; border-radius: 8px;
+  padding: 10px 12px; margin-bottom: 8px; font-size: 12px;
 }
-.training-select:focus { border-color: #5865f2; }
-.training-note-text {
-  font-size: 11px; color: #4b5563; margin-top: 8px; font-style: italic;
+.dataset-block:hover { border-color: #2a2f3e; }
+.dataset-block-header {
+  display: flex; justify-content: space-between; align-items: center;
+  margin-bottom: 6px;
 }
+.dataset-block-file { color: #818cf8; font-weight: 600; font-size: 11px; }
+.dataset-block-chars { color: #6b7280; font-size: 11px; }
+.dataset-block-text {
+  color: #9ca3af; font-size: 11px; line-height: 1.5;
+  white-space: pre-wrap; word-break: break-word;
+  max-height: 60px; overflow: hidden; margin: 4px 0;
+  font-family: inherit;
+}
+.dataset-block-text.dataset-block-full { max-height: none; }
+.dataset-block-actions { display: flex; gap: 6px; margin-top: 4px; }
+.dataset-toolbar {
+  display: flex; justify-content: space-between; align-items: center;
+  margin-bottom: 10px; font-size: 12px; color: #6b7280;
+}
+.dataset-toolbar-actions { display: flex; gap: 6px; }
+.dataset-page-info { color: #9ca3af; }
+.btn-xs { padding: 3px 8px; font-size: 11px; }
+.btn-xs:disabled { opacity: 0.4; cursor: not-allowed; }
+/* training history */
+.train-history-item {
+  display: flex; align-items: center; gap: 12px;
+  padding: 10px 14px; border-radius: 8px;
+  background: #0d0f14; border: 1px solid #1e2230;
+  margin-bottom: 6px; font-size: 12px; color: #9ca3af;
+}
+.train-history-item:hover { border-color: #2a2f3e; transition: border-color .15s; }
+.train-history-info { flex: 1; min-width: 0; }
+.train-history-title { color: #e1e4eb; font-weight: 600; font-size: 13px; }
+.train-history-meta { color: #6b7280; font-size: 11px; margin-top: 2px; }
+.train-history-loss { color: #f59e0b; font-weight: 600; white-space: nowrap; }
 
 /* ===== MODELS PANEL (enhanced) ===== */
 .model-badge-installed { background: #14532d; color: #4ade80; }
 .model-badge-not-installed { background: #1f2937; color: #6b7280; }
+.model-badge-scratch { background: #3b1f1f; color: #f87171; }
 .scratch-form {
   background: #151820; border: 1px solid #252a38;
   border-radius: 12px; padding: 16px; margin-bottom: 14px;
@@ -1014,3 +1121,69 @@ canvas.metric-canvas { width: 100%; height: 80px; display: block; }
   white-space: pre-wrap; word-break: break-all;
   max-height: 160px; overflow-y: auto;
 }
+
+/* ===== CRAWL PANEL ===== */
+.crawl-row {
+  display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin-bottom: 10px;
+}
+.crawl-url-input { flex: 1; min-width: 200px; font-family: monospace; font-size: 12px; }
+.crawl-label { font-size: 12px; color: #9ca3af; white-space: nowrap; display: flex; align-items: center; gap: 4px; }
+.crawl-num-input {
+  width: 60px; padding: 4px 6px; border-radius: 6px;
+  border: 1px solid #2a2f3e; background: #0d0f14; color: #e1e4eb;
+  outline: none; font-size: 12px; text-align: center;
+}
+.crawl-num-input:focus { border-color: #5865f2; }
+.crawl-status { margin: 10px 0; }
+.crawl-stats {
+  display: flex; gap: 14px; flex-wrap: wrap; font-size: 12px; color: #9ca3af; margin-bottom: 8px;
+}
+.crawl-stats strong { color: #e1e4eb; }
+.crawl-state { font-weight: 600; }
+.crawl-state.running { color: #fbbf24; }
+.crawl-state.done { color: #4ade80; }
+.crawl-state.stopped { color: #f87171; }
+.crawl-progress-wrap {
+  width: 100%; height: 6px; background: #1a1d27; border-radius: 3px; overflow: hidden; margin: 6px 0;
+}
+.crawl-progress-bar {
+  height: 100%; background: linear-gradient(90deg, #5865f2, #7c8cf8); border-radius: 3px; transition: width .3s;
+}
+.crawl-log {
+  font-size: 11px; color: #6b7280; max-height: 200px; overflow-y: auto; margin-top: 8px;
+  font-family: monospace;
+}
+.crawl-log-item { padding: 2px 0; border-bottom: 1px solid #111318; }
+.crawl-chart-wrap { margin: 8px 0; }
+.crawl-chart-wrap canvas { display: block; background: #0d0f14; border: 1px solid #1e2230; border-radius: 8px; }
+.crawl-chart-legend { font-size: 11px; color: #9ca3af; margin-top: 4px; }
+.chart-legend-dot {
+  display: inline-block; width: 8px; height: 8px; border-radius: 2px; vertical-align: middle; margin-right: 3px;
+}
+
+/* ===== MODELS PANEL (redesigned) ===== */
+.model-card { position: relative; flex-wrap: wrap; }
+.model-actions { display: flex; gap: 4px; flex-shrink: 0; }
+.model-edit-form {
+  width: 100%; margin-top: 8px; padding: 10px;
+  background: #0d0f14; border: 1px solid #252a38; border-radius: 8px;
+  display: flex; flex-direction: column; gap: 6px;
+}
+.add-model-form {
+  background: #151820; border: 1px solid #252a38;
+  border-radius: 12px; padding: 16px; margin-bottom: 14px;
+  display: flex; flex-direction: column; gap: 8px;
+}
+.add-model-tabs { display: flex; gap: 4px; }
+.add-model-tab {
+  padding: 4px 10px; border-radius: 6px; font-size: 12px;
+  border: 1px solid #252a38; background: transparent; color: #9ca3af;
+  cursor: pointer; transition: background .12s, color .12s;
+}
+.add-model-tab.active { background: #1e2332; color: #e1e4eb; border-color: #3b4466; }
+.add-model-tab:hover { background: #1a1d27; color: #e1e4eb; }
+.add-model-row { display: flex; gap: 8px; align-items: center; }
+.add-model-row input { flex: 1; }
+
+
+

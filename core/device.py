@@ -46,7 +46,7 @@ def _openvino_devices() -> list[dict]:
     try:
         import openvino as ov
         core = ov.Core()
-        for d in core.available_devices:  # CPU, GPU, NPU, ...
+        for d in core.available_devices:
             if d == "CPU":
                 continue
             try:
@@ -62,9 +62,9 @@ def _openvino_devices() -> list[dict]:
 def detect() -> dict:
     os_i = _os()
     accels = _torch_gpus() + _openvino_devices()
-    backend, quant = _choose(accels)
+    be, quant = _choose(accels)
     return {"os": os_i, **_cpu_ram(), "accelerators": accels,
-            "backend": backend, "quant": quant}
+            "backend": be, "quant": quant}
 
 
 def _has_openvino() -> bool:
@@ -84,7 +84,6 @@ def _choose(accels: list[dict]) -> tuple[str, str]:
         return "rocm", "fp16"
     if "mps" in kinds:
         return "mps", "fp16"
-    # Intel NPU/iGPU — или CPU, если установлен OpenVINO (int4 экономит память)
     if any(a.get("device") in ("NPU", "GPU") for a in accels if a.get("backend") == "openvino"):
         return "openvino", "int4-ov"
     if _has_openvino():

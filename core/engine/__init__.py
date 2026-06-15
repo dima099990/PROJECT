@@ -67,6 +67,8 @@ class Engine:
     def load(self, model_id: str, adapter: str | None = None) -> None:
         be = self.backend_for(model_id)
         with self._lock:
+            if self.impl:
+                self.impl.unload()
             if be == "openvino":
                 from core.engine.engine_openvino import OVEngine
                 impl = OVEngine()

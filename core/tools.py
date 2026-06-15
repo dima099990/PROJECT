@@ -3,6 +3,7 @@
 лог всех операций, стоп-флаг, таймауты. Кроссплатформенно (pathlib)."""
 from __future__ import annotations
 import os
+import re
 import subprocess
 import sys
 import tempfile
@@ -14,13 +15,24 @@ from core import safety
 _MAX_READ = 2_000_000  # 2 МБ на чтение в контекст
 
 
+def _p(path: str | Path) -> Path:
+    """Нормализация путей (терпимость к огрехам модели):
+    /C:/PROJECT, \\C:\\PROJECT -> C:/PROJECT; убираем кавычки; ~ разворачиваем."""
+    s = str(path).strip().strip('"').strip("'")
+    # ведущий слэш перед буквой диска (Windows): /C:/.. или \C:\.. -> C:/..
+    m = re.match(r"^[\\/]+([a-zA-Z]:[\\/].*)$", s)
+    if m:
+        s = m.group(1)
+    return Path(s).expanduser()
+
+
 def _err(tool, msg, **extra):
     return {"tool": tool, "ok": False, "error": msg, **extra}
 
 
 # ---------- Файлы ----------
 def fs_list(path: str = ".") -> dict:
-    p = Path(path).expanduser()
+    p = _p(path)
     if not p.exists():
         return _err("fs_list", "не найдено", path=str(p))
     if p.is_file():
@@ -35,7 +47,7 @@ def fs_list(path: str = ".") -> dict:
 
 
 def fs_read(path: str, max_bytes: int = _MAX_READ) -> dict:
-    p = Path(path).expanduser()
+    p = _p(path)
     if not p.is_file():
         return _err("fs_read", "не файл", path=str(p))
     try:
@@ -46,7 +58,7 @@ def fs_read(path: str, max_bytes: int = _MAX_READ) -> dict:
 
 
 def fs_write(path: str, content: str) -> dict:
-    p = Path(path).expanduser()
+    p = _p(path)
     if not safety.is_writable(p):
         return _err("fs_write", "запрещено whitelist'ом", path=str(p))
     try:
@@ -59,7 +71,7 @@ def fs_write(path: str, content: str) -> dict:
 
 
 def fs_edit(path: str, old: str, new: str) -> dict:
-    p = Path(path).expanduser()
+    p = _p(path)
     if not safety.is_writable(p):
         return _err("fs_edit", "запрещено whitelist'ом", path=str(p))
     if not p.is_file():
@@ -76,7 +88,7 @@ def fs_edit(path: str, old: str, new: str) -> dict:
 
 
 def fs_move(src: str, dst: str) -> dict:
-    s, d = Path(src).expanduser(), Path(dst).expanduser()
+    s, d = _p(src), _p(dst)
     if not safety.is_writable(d):
         return _err("fs_move", "запрещено whitelist'ом", dst=str(d))
     try:
@@ -90,7 +102,7 @@ def fs_move(src: str, dst: str) -> dict:
 
 
 def fs_delete(path: str) -> dict:
-    p = Path(path).expanduser()
+    p = _p(path)
     if not safety.is_writable(p):
         return _err("fs_delete", "запрещено whitelist'ом", path=str(p))
     try:
@@ -101,7 +113,7 @@ def fs_delete(path: str) -> dict:
 
 
 def fs_mkdir(path: str) -> dict:
-    p = Path(path).expanduser()
+    p = _p(path)
     if not safety.is_writable(p):
         return _err("fs_mkdir", "запрещено whitelist'ом", path=str(p))
     try:

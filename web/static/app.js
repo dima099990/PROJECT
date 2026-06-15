@@ -39,8 +39,21 @@ async function showApp() {
   await refreshStatus();
   loadSettings();
   await loadChats();
-  setPanel("chat");
+  const saved = localStorage.getItem("curPanel");
+  setPanel(saved && saved !== "login" ? saved : "chat");
   startMetricsLoop();
+  loadSavedModel();
+}
+
+async function loadSavedModel() {
+  if (modelLoaded) return;
+  try {
+    const { active } = await apiJson("/api/models/active");
+    if (active) {
+      await apiJson("/api/models/load", { method: "POST", body: JSON.stringify({ model_id: active }) });
+      await refreshStatus();
+    }
+  } catch (e) {}
 }
 
 async function loadSettings() {
@@ -85,6 +98,7 @@ function setPanel(name) {
     clearInterval(_logsTimer); _logsTimer = null;
   }
   curPanel = name;
+  localStorage.setItem("curPanel", name);
   document.querySelectorAll(".nav-btn").forEach(b => b.classList.toggle("active", b.dataset.panel === name));
   document.querySelectorAll(".panel").forEach(p => p.classList.toggle("active", p.id === "panel-" + name));
   const loaders = {
@@ -249,9 +263,11 @@ async function stopGen() {
   setGenerating(false);
 }
 
-// ===== МОДЕЛИ =====
+// ===== МОДЕЛИ (CRUD: полный) =====
 async function loadModels() {
   const { models, active } = await apiJson("/api/models");
+  const addBtn = `<button class="btn-sm" onclick="toggleAddModel()" style="margin-bottom:12px">${t("models_add_btn")}</button>`;
+  const addForm = addModelFormHtml();
   const cards = models.map(m => {
     const isActive = m.id === active;
     let badge, actionBtn;
@@ -261,90 +277,167 @@ async function loadModels() {
     } else if (m.downloaded) {
       badge = `<span class="card-badge model-badge-installed">${t("models_status_installed")}</span>`;
       actionBtn = `<button class="btn-sm" onclick="doLoadModel('${m.id}', this)">${t("models_run_btn")}</button>`;
+    } else if (m.type === "scratch") {
+      badge = `<span class="card-badge model-badge-scratch">${t("models_status_not_trained")}</span>`;
+      actionBtn = `<button class="btn-sm" disabled style="opacity:0.5">${t("models_status_not_trained")}</button>`;
     } else {
       badge = `<span class="card-badge model-badge-not-installed">${t("models_status_not_installed")}</span>`;
       actionBtn = `<button class="btn-sm" onclick="doLoadModel('${m.id}', this)">${t("models_download_run_btn")}</button>`;
     }
-    const del = m.source === "custom"
+    const editBtn = `<button class="chat-action-btn" title="${t("models_edit_btn")}" onclick="toggleEditModel('${m.id}')">✎</button>`;
+    const delBtn = m.source === "custom"
       ? `<button class="chat-action-btn" title="${t("delete")}" onclick="removeModel('${m.id}')">🗑</button>` : "";
-    return `<div class="card">
+    const editForm = `<div class="model-edit-form hidden" id="me-${escapeText(m.id)}">
+      <input class="am-input me-name" value="${escapeText(m.name)}" placeholder="${t("models_field_name")}"/>
+      <input class="am-input me-note" value="${escapeText(m.note || "")}" placeholder="${t("models_field_note")}"/>
+      <input class="am-input me-quant" value="${escapeText(m.quant || "")}" placeholder="${t("models_field_quant")}"/>
+      <input class="am-input me-size" type="number" step="0.1" value="${m.size_gb || 0}" placeholder="${t("models_field_size")}"/>
+      <label class="muted" style="font-size:12px"><input type="checkbox" class="me-trainable" ${m.trainable ? "checked" : ""}/> ${t("models_field_trainable")}</label>
+      <button class="btn-sm" onclick="saveEditModel('${m.id}')">${t("models_save_btn")}</button>
+      ${m.source !== "custom" ? `<span class="muted" style="font-size:11px">${t("models_not_editable")}</span>` : ""}
+    </div>`;
+    return `<div class="card model-card" data-id="${m.id}">
       <div class="card-info">
         <div class="card-title">${escapeText(m.name)} ${badge}</div>
         <div class="card-sub">${escapeText(m.quant || "")} · ${m.size_gb || "?"} ГБ · ${escapeText(m.note || "")}</div>
       </div>
-      ${del}${actionBtn}
+      <div class="model-actions">${editBtn}${delBtn}</div>
+      ${actionBtn}
+      ${editForm}
     </div>`;
   }).join("");
-  $("models-view").innerHTML = `<div id="adapters-section"></div>` + scratchFormHtml() + addModelFormHtml() + cards;
-  _bindScratchInputs();
-  loadAdaptersSection();
+  $("models-view").innerHTML = `${addBtn}${addForm}<div class="models-list">${cards}</div>`;
 }
 
-async function loadAdaptersSection() {
-  const sec = $("adapters-section"); if (!sec) return;
-  const r = await apiJson("/api/adapters").catch(() => ({ adapters: [], active: null }));
-  if (!r.adapters || !r.adapters.length) {
-    sec.innerHTML = `<div class="muted" style="margin-bottom:10px">${t("no_adapters")}</div>`;
-    return;
-  }
-  const rows = r.adapters.map(a => `
-    <div class="card">
-      <div class="card-info">
-        <div class="card-title">${escapeText(a.id)} ${a.active ? `<span class="card-badge badge-active">✓ ${t("active")}</span>` : ""}</div>
-        <div class="card-sub">${t("adapter_base")}: ${escapeText(a.base || "?")}</div>
-      </div>
-      ${a.active
-        ? `<button class="btn-sm" onclick="detachAdapter()">${t("adapter_detach")}</button>`
-        : `<button class="btn-sm" onclick="attachAdapter('${escapeAttr(a.id)}', this)">${t("adapter_attach")}</button>`}
-    </div>`).join("");
-  sec.innerHTML = `<div class="panel-title" style="font-size:15px">🧩 ${t("adapters")}</div>${rows}`;
+function toggleEditModel(id) {
+  const form = document.getElementById("me-" + id);
+  if (form) form.classList.toggle("hidden");
 }
-async function attachAdapter(id, btn) {
-  if (btn) { btn.disabled = true; btn.textContent = t("loading"); }
-  const r = await apiJson("/api/adapters/attach", { method: "POST", body: JSON.stringify({ path: id }) });
-  if (!r.ok) alert(r.reason || t("error"));
-  await refreshStatus(); loadModels();
-}
-async function detachAdapter() {
-  await apiJson("/api/adapters/detach", { method: "POST" });
-  await refreshStatus(); loadModels();
+
+async function saveEditModel(id) {
+  const card = document.querySelector(`.model-card[data-id="${id}"]`);
+  if (!card) return;
+  const name = card.querySelector(".me-name").value.trim();
+  const note = card.querySelector(".me-note").value.trim();
+  const quant = card.querySelector(".me-quant").value.trim();
+  const size_gb = parseFloat(card.querySelector(".me-size").value) || 0;
+  const trainable = card.querySelector(".me-trainable").checked;
+  const updates = { name, note, quant, size_gb, trainable };
+  const r = await apiJson("/api/models/" + id, { method: "PUT", body: JSON.stringify(updates) });
+  if (r.ok) loadModels();
+  else alert(r.reason || t("error"));
 }
 
 function addModelFormHtml() {
-  return `<div class="card" style="display:block">
-    <div class="card-title" style="cursor:pointer" onclick="document.getElementById('add-model-body').classList.toggle('hidden')">➕ ${t("add_model")}</div>
-    <div id="add-model-body" class="hidden" style="margin-top:10px;display:flex;flex-direction:column;gap:8px">
-      <div class="card-sub">${t("add_model_hint")}</div>
-      <div style="display:flex;gap:8px">
-        <input id="am-repo" class="am-input" placeholder="${t("repo_ph")}" style="flex:1"/>
-        <button class="btn-sm" onclick="fetchRepoFiles()">${t("fetch_files")}</button>
-      </div>
-      <select id="am-file" class="am-input"><option value="">${t("filename_ph")}</option></select>
-      <input id="am-name" class="am-input" placeholder="${t("name_ph")}"/>
-      <div id="am-err" class="err"></div>
-      <button class="btn-sm" onclick="submitAddModel(this)">${t("add_btn")}</button>
+  return `<div id="add-model-form" class="hidden add-model-form">
+    <div class="add-model-tabs" id="amt-tabs">
+      <span class="add-model-tab active" data-tab="hf" onclick="switchAddTab('hf')">${t("models_add_tab_hf")}</span>
+      <span class="add-model-tab" data-tab="gguf" onclick="switchAddTab('gguf')">${t("models_add_tab_gguf")}</span>
+      <span class="add-model-tab" data-tab="ov" onclick="switchAddTab('ov')">${t("models_add_tab_ov")}</span>
+      <span class="add-model-tab" data-tab="scratch" onclick="switchAddTab('scratch')">${t("models_add_tab_scratch")}</span>
     </div>
+    <div id="amt-repo" class="amt-group">
+      <input id="am-repo" class="am-input" placeholder="${t("models_add_repo_ph")}"/>
+    </div>
+    <div id="amt-file" class="amt-group hidden">
+      <div class="add-model-row" id="am-file-row"><input id="am-file" class="am-input" placeholder="${t("models_add_file_ph")}"/><button class="btn-sm" onclick="fetchRepoFiles()">${t("fetch_files")}</button></div>
+    </div>
+    <input id="am-name" class="am-input" placeholder="${t("models_add_name_ph")}"/>
+    <div id="amt-scratch" class="amt-group hidden">
+      <div class="scratch-fields">
+        <div class="scratch-field"><label>${t("models_scratch_layers")}</label><input id="am-layers" class="scratch-input" type="number" value="12" min="1"/></div>
+        <div class="scratch-field"><label>${t("models_scratch_embd")}</label><input id="am-embd" class="scratch-input" type="number" value="768" min="64"/></div>
+        <div class="scratch-field"><label>${t("models_scratch_heads")}</label><input id="am-heads" class="scratch-input" type="number" value="12" min="1"/></div>
+        <div class="scratch-field"><label>${t("models_scratch_ctx")}</label><input id="am-ctx" class="scratch-input" type="number" value="1024" min="128"/></div>
+        <div class="scratch-field" style="grid-column:1/-1"><label>${t("models_scratch_vocab")}</label><input id="am-vocab" class="scratch-input" type="number" value="32000" min="1000"/></div>
+      </div>
+      <div class="scratch-params-preview" id="am-sc-preview">${t("models_scratch_params").replace("{n}", "?")}</div>
+    </div>
+    <div id="am-err" class="err"></div>
+    <button class="btn-sm" onclick="submitAddModel()">${t("models_add_create")}</button>
   </div>`;
 }
+let _addModelTab = "hf";
+function toggleAddModel() {
+  const f = $("add-model-form");
+  if (!f) return;
+  f.classList.toggle("hidden");
+  if (!f.classList.contains("hidden")) switchAddTab("hf");
+}
+function switchAddTab(tab) {
+  _addModelTab = tab;
+  document.querySelectorAll("#amt-tabs .add-model-tab").forEach(t => t.classList.toggle("active", t.dataset.tab === tab));
+  document.getElementById("amt-repo").classList.toggle("hidden", tab === "scratch");
+  document.getElementById("amt-file").classList.toggle("hidden", tab !== "gguf");
+  document.getElementById("amt-scratch").classList.toggle("hidden", tab !== "scratch");
+  _bindAddModelParams();
+}
+function _bindAddModelParams() {
+  const el = $("am-embd");
+  if (el) {
+    const update = () => {
+      const layers = parseInt($("am-layers")?.value) || 0;
+      const embd = parseInt($("am-embd")?.value) || 0;
+      const vocab = parseInt($("am-vocab")?.value) || 0;
+      const p = layers * 12 * embd * embd + vocab * embd;
+      const prev = $("am-sc-preview");
+      if (prev) prev.textContent = t("models_scratch_params").replace("{n}", Math.round(p / 1e6 * 10) / 10);
+    };
+    ["am-layers","am-embd","am-heads","am-ctx","am-vocab"].forEach(id => {
+      const e = $(id);
+      if (e) e.addEventListener("input", update);
+    });
+    update();
+  }
+}
+
 async function fetchRepoFiles() {
-  const repo = $("am-repo").value.trim(); if (!repo) return;
+  const repo = $("am-repo")?.value?.trim();
+  if (!repo) return;
   $("am-err").textContent = t("loading");
   try {
     const r = await apiJson("/api/models/repo_files?repo=" + encodeURIComponent(repo));
     if (r.error || !r.files.length) { $("am-err").textContent = r.error || t("error"); return; }
-    $("am-file").innerHTML = r.files.map(f => `<option value="${escapeText(f)}">${escapeText(f)}</option>`).join("");
+    const fileRow = $("am-file-row");
+    if (fileRow) {
+      fileRow.innerHTML = `<select id="am-file" class="am-input">${r.files.map(f => `<option value="${escapeText(f)}">${escapeText(f)}</option>`).join("")}</select>`;
+    }
     $("am-err").textContent = "";
   } catch (e) { $("am-err").textContent = t("error"); }
 }
-async function submitAddModel(btn) {
-  const repo = $("am-repo").value.trim();
-  const filename = $("am-file").value;
-  const name = $("am-name").value.trim() || filename.replace(".gguf", "");
-  if (!repo || !filename) { $("am-err").textContent = t("add_model_need"); return; }
-  btn.disabled = true;
-  const r = await apiJson("/api/models/add", { method: "POST", body: JSON.stringify({ name, repo, filename }) });
-  btn.disabled = false;
-  if (r.ok) { loadModels(); } else { $("am-err").textContent = r.reason || t("error"); }
+async function submitAddModel() {
+  const source = _addModelTab;
+  if (source === "scratch") {
+    const name = $("am-name")?.value?.trim();
+    if (!name) { $("am-err").textContent = t("models_add_name_ph"); return; }
+    const n_embd = parseInt($("am-embd")?.value) || 768;
+    const n_heads = parseInt($("am-heads")?.value) || 12;
+    if (n_embd % n_heads !== 0) {
+      $("am-err").textContent = `Размерность ${n_embd} не кратна числу голов ${n_heads}. Исправьте.`;
+      return;
+    }
+    const body = {
+      name, n_layers: parseInt($("am-layers")?.value) || 12, n_embd, n_heads,
+      n_ctx: parseInt($("am-ctx")?.value) || 1024, vocab: parseInt($("am-vocab")?.value) || 32000,
+    };
+    $("am-err").textContent = "";
+    const r = await apiJson("/api/models/scratch", { method: "POST", body: JSON.stringify(body) });
+    if (r.ok) { toggleAddModel(); loadModels(); }
+    else { $("am-err").textContent = r.reason || t("error"); }
+    return;
+  }
+  const repo = $("am-repo")?.value?.trim();
+  const filename = $("am-file")?.value?.trim() || "";
+  const name = $("am-name")?.value?.trim() || filename.replace(".gguf", "") || repo.split("/").pop() || "model";
+  if (!repo) { $("am-err").textContent = "Укажите репозиторий"; return; }
+  const body = { name, repo, filename,
+    type: source === "ov" ? "ov" : "hf",
+    note: source === "gguf" ? "GGUF" : source === "ov" ? "OpenVINO" : "safetensors",
+  };
+  $("am-err").textContent = "";
+  const r = await apiJson("/api/models/add", { method: "POST", body: JSON.stringify(body) });
+  if (r.ok) { toggleAddModel(); loadModels(); }
+  else { $("am-err").textContent = r.reason || t("error"); }
 }
 async function removeModel(id) {
   if (!confirm(t("delete") + "?")) return;
@@ -358,68 +451,6 @@ async function doLoadModel(id, btn) {
     if (r && r.ok === false) alert(r.reason || t("error"));
     await refreshStatus(); await loadModels();
   } catch (e) { btn.disabled = false; btn.textContent = t("error"); }
-}
-
-// ===== SCRATCH (модель с нуля) =====
-function scratchFormHtml() {
-  return `<div class="scratch-form">
-    <div class="scratch-form-title" onclick="$('scratch-body').classList.toggle('hidden')">
-      ➕ ${t("models_scratch_title")}
-    </div>
-    <div id="scratch-body" class="hidden">
-      <div class="scratch-name-row">
-        <input id="sc-name" class="scratch-input" placeholder="${t("models_scratch_name_ph")}"/>
-      </div>
-      <div class="scratch-fields">
-        <div class="scratch-field"><label>${t("models_scratch_layers")}</label><input id="sc-layers" class="scratch-input" type="number" value="12" min="1"/></div>
-        <div class="scratch-field"><label>${t("models_scratch_embd")}</label><input id="sc-embd" class="scratch-input" type="number" value="768" min="64"/></div>
-        <div class="scratch-field"><label>${t("models_scratch_heads")}</label><input id="sc-heads" class="scratch-input" type="number" value="12" min="1"/></div>
-        <div class="scratch-field"><label>${t("models_scratch_ctx")}</label><input id="sc-ctx" class="scratch-input" type="number" value="1024" min="128"/></div>
-        <div class="scratch-field" style="grid-column:1/-1"><label>${t("models_scratch_vocab")}</label><input id="sc-vocab" class="scratch-input" type="number" value="32000" min="1000"/></div>
-      </div>
-      <div class="scratch-params-preview" id="sc-preview"></div>
-      <div class="scratch-err" id="sc-err"></div>
-      <button class="btn-sm" onclick="submitScratch(this)">${t("models_scratch_create")}</button>
-      <div class="training-note-text">${t("models_scratch_note")}</div>
-    </div>
-  </div>`;
-}
-function _calcScratchParams() {
-  const layers = parseInt($("sc-layers").value) || 0;
-  const embd   = parseInt($("sc-embd").value)   || 0;
-  const vocab  = parseInt($("sc-vocab").value)   || 0;
-  const p = layers * 12 * embd * embd + vocab * embd;
-  const m = Math.round(p / 1e6 * 10) / 10;
-  const prev = $("sc-preview");
-  if (prev) prev.textContent = t("models_scratch_params").replace("{n}", m);
-}
-function _bindScratchInputs() {
-  ["sc-layers","sc-embd","sc-heads","sc-ctx","sc-vocab"].forEach(id => {
-    const el = $(id); if (el) el.addEventListener("input", _calcScratchParams);
-  });
-  _calcScratchParams();
-}
-async function submitScratch(btn) {
-  const name = $("sc-name").value.trim();
-  if (!name) { $("sc-err").textContent = t("models_scratch_name_ph"); return; }
-  const body = {
-    name,
-    n_layers: parseInt($("sc-layers").value) || 12,
-    n_embd:   parseInt($("sc-embd").value)   || 768,
-    n_heads:  parseInt($("sc-heads").value)   || 12,
-    n_ctx:    parseInt($("sc-ctx").value)     || 1024,
-    vocab:    parseInt($("sc-vocab").value)   || 32000,
-  };
-  btn.disabled = true;
-  try {
-    const r = await apiJson("/api/models/scratch", { method: "POST", body: JSON.stringify(body) });
-    if (r.ok) { $("sc-err").textContent = ""; $("sc-name").value = ""; loadModels(); }
-    else { $("sc-err").textContent = r.reason || t("error"); }
-  } catch (e) {
-    $("sc-err").textContent = (e && e.message) || t("error");
-  } finally {
-    btn.disabled = false;
-  }
 }
 
 // ===== АГЕНТЫ (CRUD) =====
@@ -520,62 +551,116 @@ async function deleteAgent(id) {
   loadAgents();
 }
 
-// ===== ОБУЧЕНИЕ =====
+// ===== ОБУЧЕНИЕ (полный редизайн) =====
+let _trainTimer = null;
+let _trainLossHist = [];
+let _trainPplHist = [];
+
 async function loadTraining() {
-  const [{ models }, corpus] = await Promise.all([
+  const [{ models, active }, corpus] = await Promise.all([
     apiJson("/api/models"),
     apiJson("/api/data/corpus").catch(() => ({ files: 0, chars: 0, approx_tokens: 0 })),
   ]);
-  const allOpts = models.map(m => `<option value="${escapeText(m.id)}">${escapeText(m.name)}${m.type === "scratch" ? " (своя)" : ""}</option>`).join("");
-  const modelOpts = allOpts || `<option value="">${t("error")}</option>`;
+  const allOpts = models.map(m => `<option value="${escapeText(m.id)}"${m.id === active ? " selected" : ""}>${escapeText(m.name)}${m.type === "scratch" ? " (своя)" : ""}</option>`).join("");
+  const modelOpts = allOpts || `<option value="">—</option>`;
 
   $("training-view").innerHTML = `
     <div class="training-section">
-      <div class="training-section-title">1. ${t("training_urls_label")}</div>
-      <textarea id="tr-urls" class="training-textarea" placeholder="${t("training_urls_ph")}"></textarea>
-      <div style="margin-top:10px;display:flex;gap:8px;align-items:center">
-        <button class="btn-sm" onclick="doParse()">${t("training_parse_btn")}</button>
-        <div id="tr-parse-msg" style="font-size:12px;color:#6b7280"></div>
+      <div class="training-section-title">📊 ${t("train_dataset")}</div>
+      <div class="train-dataset-row" id="tr-corpus">
+        <span>${t("train_corpus_files")}: <strong>${corpus.files||0}</strong></span>
+        <span>${t("train_corpus_chars")}: <strong>${(corpus.chars||0).toLocaleString()}</strong></span>
+        <span>${t("train_corpus_tokens")}: <strong>${(corpus.approx_tokens||0).toLocaleString()}</strong></span>
+        <button class="btn-ghost" onclick="showDataPanel()">📥 Сбор данных</button>
+        <button class="btn-ghost" onclick="toggleDatasetView()">${t("dataset_view_btn")}</button>
       </div>
-      <div id="tr-parse-result" class="training-parse-result hidden"></div>
+      <div id="tr-dataset-view" class="hidden train-data-panel" style="margin-top:10px"></div>
     </div>
     <div class="training-section">
-      <div class="training-section-title">${t("training_corpus_title")}</div>
-      <div class="training-corpus-row" id="tr-corpus">
-        <span class="training-corpus-item">${t("training_corpus_files")}: <strong>${corpus.files||0}</strong></span>
-        <span class="training-corpus-item">${t("training_corpus_chars")}: <strong>${(corpus.chars||0).toLocaleString()}</strong></span>
-        <span class="training-corpus-item">${t("training_corpus_tokens")}: <strong>${(corpus.approx_tokens||0).toLocaleString()}</strong></span>
+      <div class="training-section-title">⚙️ ${t("training_model_select")}</div>
+      <div class="train-grid">
+        <div class="train-field"><label>${t("train_mode")}</label>
+          <select id="tr-mode" class="train-select" onchange="onTrainModeChange()">
+            <option value="scratch">${t("train_mode_scratch")}</option>
+            <option value="distill">${t("train_mode_distill")}</option>
+          </select></div>
+        <div class="train-field"><label>${t("train_target")}</label>
+          <select id="tr-model" class="train-select">${modelOpts}</select></div>
+        <div class="train-field hidden" id="tr-teacher-field"><label>${t("train_teacher")}</label>
+          <select id="tr-teacher" class="train-select">${modelOpts}</select></div>
+        <div class="train-field"><label>${t("train_epochs")}</label>
+          <input id="tr-epochs" class="train-num" type="number" value="1" min="1" max="100"/></div>
+        <div class="train-field"><label>${t("train_lr")}</label>
+          <input id="tr-lr" class="train-num" type="number" value="0.0002" step="0.0001" min="1e-6" max="0.1"/></div>
+        <div class="train-field buttons-row">
+          <button class="btn-sm" id="tr-start-btn" onclick="doTrain()">${t("train_start")}</button>
+          <button class="btn-sm" id="tr-stop-btn" style="display:none;background:#7f1d1d;border:1px solid #ef4444;color:#fca5a5" onclick="stopTrain()">${t("train_stop")}</button>
+        </div>
       </div>
-    </div>
-    <div class="training-section">
-      <div class="training-section-title">2. ${t("training_model_select")}</div>
-      <div class="files-bar">
-        <label class="muted">${t("train_mode")}</label>
-        <select id="tr-mode" class="training-select" onchange="document.getElementById('tr-teacher-row').style.display=this.value==='distill'?'flex':'none'">
-          <option value="adapter">${t("train_mode_adapter")}</option>
-          <option value="scratch">${t("train_mode_scratch")}</option>
-          <option value="distill">${t("train_mode_distill")}</option>
-        </select>
+      <div id="tr-train-status" class="hidden train-status">
+        <div class="train-progress-wrap"><div class="train-progress-bar" id="tr-progress" style="width:0%"></div></div>
+        <div class="train-metrics" id="tr-metrics"></div>
+        <canvas id="tr-loss-chart" width="600" height="140" class="train-loss-chart hidden"></canvas>
       </div>
-      <div class="files-bar">
-        <label class="muted">${t("train_target")}</label>
-        <select id="tr-model" class="training-select">${modelOpts}</select>
-      </div>
-      <div class="files-bar" id="tr-teacher-row" style="display:none">
-        <label class="muted">${t("train_teacher")}</label>
-        <select id="tr-teacher" class="training-select">${modelOpts}</select>
-      </div>
-      <button class="btn-sm" onclick="doTrain()">${t("training_start_btn")}</button>
-      <div id="tr-train-msg" style="font-size:12px;color:#6b7280;margin-top:6px"></div>
       <div class="training-note-text">${t("train_modes_note")}</div>
+    </div>
+    <div class="training-section">
+      <div class="training-section-title">📜 ${t("train_history_title")}</div>
+      <div id="tr-history"></div>
     </div>`;
+  loadTrainHistory();
+  _trainLossHist = [];
+  _trainPplHist = [];
+}
+
+function onTrainModeChange() {
+  const v = $("tr-mode")?.value;
+  $("tr-teacher-field").classList.toggle("hidden", v !== "distill");
+}
+
+function showDataPanel() {
+  const p = $("tr-corpus");
+  if (!p) return;
+  // inline expand для сбора данных
+  let dataDiv = $("tr-data-panel");
+  if (dataDiv) { dataDiv.classList.toggle("hidden"); return; }
+  const html = `<div id="tr-data-panel" class="train-data-panel">
+    <div class="train-data-row">
+      <textarea id="tr-urls" class="training-textarea" placeholder="${t("training_urls_ph")}" style="min-height:60px;flex:1"></textarea>
+      <div class="train-data-actions">
+        <button class="btn-sm" onclick="doParse()">${t("training_parse_btn")}</button>
+        <button class="btn-sm" id="cr-start-btn" onclick="startCrawl()">${t("crawl_start_btn")}</button>
+        <button class="btn-sm" style="display:none" id="cr-stop-btn2" onclick="stopCrawl()">${t("crawl_stop_btn")}</button>
+      </div>
+    </div>
+    <div id="tr-parse-msg" style="font-size:12px;color:#6b7280"></div>
+    <div id="tr-parse-result" class="training-parse-result hidden"></div>
+    <div class="crawl-row">
+      <input id="cr-url" class="am-input crawl-url-input" placeholder="${t("crawl_url_ph")}" value="https://"/>
+      <label class="crawl-label">${t("crawl_depth")}: <input id="cr-depth" class="crawl-num-input" type="number" value="2" min="1" max="10"/></label>
+      <label class="crawl-label">${t("crawl_max")}: <input id="cr-max" class="crawl-num-input" type="number" value="50" min="1" max="1000"/></label>
+    </div>
+    <div id="cr-status" class="crawl-status hidden">
+      <div class="crawl-stats">
+        <span>${t("crawl_pages")}: <strong id="cr-pages">0</strong></span>
+        <span>${t("crawl_chars")}: <strong id="cr-chars">0</strong></span>
+        <span>${t("crawl_errors")}: <strong id="cr-errors">0</strong></span>
+        <span id="cr-state" class="crawl-state"></span>
+      </div>
+      <div class="crawl-progress-wrap"><div class="crawl-progress-bar" id="cr-progress" style="width:0%"></div></div>
+      <div class="crawl-chart-wrap hidden"><canvas id="cr-chart" width="600" height="120"></canvas></div>
+    </div>
+    <div id="cr-log" class="crawl-log"></div>
+  </div>`;
+  p.parentElement.insertAdjacentHTML("afterend", html);
 }
 
 async function doParse() {
-  const raw = $("tr-urls").value.trim();
+  const raw = $("tr-urls")?.value?.trim();
   if (!raw) return;
   const urls = raw.split("\n").map(s => s.trim()).filter(Boolean);
   const msg = $("tr-parse-msg"); const res = $("tr-parse-result");
+  if (!msg || !res) return;
   msg.textContent = t("training_parsing"); res.classList.add("hidden");
   try {
     const r = await apiJson("/api/data/parse", { method: "POST", body: JSON.stringify({ urls }) });
@@ -590,44 +675,390 @@ async function doParse() {
     ).join("");
     res.innerHTML = `<strong>${t("training_parse_result")}:</strong>${lines}`;
     res.classList.remove("hidden");
-    // обновить corpus
-    const c = await apiJson("/api/data/corpus").catch(() => null);
-    if (c && $("tr-corpus")) {
-      $("tr-corpus").innerHTML = `
-        <span class="training-corpus-item">${t("training_corpus_files")}: <strong>${c.files||0}</strong></span>
-        <span class="training-corpus-item">${t("training_corpus_chars")}: <strong>${(c.chars||0).toLocaleString()}</strong></span>
-        <span class="training-corpus-item">${t("training_corpus_tokens")}: <strong>${(c.approx_tokens||0).toLocaleString()}</strong></span>`;
-    }
+    updateTrainingCorpus();
   } catch (e) { msg.textContent = t("error"); }
 }
 
-let _trainTimer = null;
+async function updateTrainingCorpus() {
+  const c = await apiJson("/api/data/corpus").catch(() => null);
+  if (c && $("tr-corpus")) {
+    $("tr-corpus").innerHTML = `
+      <span>${t("train_corpus_files")}: <strong>${c.files||0}</strong></span>
+      <span>${t("train_corpus_chars")}: <strong>${(c.chars||0).toLocaleString()}</strong></span>
+      <span>${t("train_corpus_tokens")}: <strong>${(c.approx_tokens||0).toLocaleString()}</strong></span>
+      <button class="btn-ghost" onclick="showDataPanel()">📥 Сбор данных</button>
+      <button class="btn-ghost" onclick="toggleDatasetView()">${t("dataset_view_btn")}</button>`;
+  }
+}
+
+// ===== DATASET VIEWER =====
+let _datasetPage = 1;
+
+async function toggleDatasetView() {
+  const el = $("tr-dataset-view");
+  if (!el) return;
+  el.classList.toggle("hidden");
+  if (!el.classList.contains("hidden")) {
+    _datasetPage = 1;
+    await loadDatasetPage();
+  }
+}
+
+async function loadDatasetPage() {
+  const el = $("tr-dataset-view");
+  if (!el) return;
+  const r = await apiJson(`/api/data/corpus/content?page=${_datasetPage}&per_page=10`).catch(() => null);
+  if (!r) { el.innerHTML = `<div class="muted">${t("error")}</div>`; return; }
+  if (!r.items || !r.items.length) {
+    el.innerHTML = `<div class="muted">${t("dataset_empty")}</div>`;
+    return;
+  }
+  const totalPages = Math.ceil(r.total / r.per_page);
+  const items = r.items.map((item, idx) => {
+    const preview = item.text.length > 200 ? item.text.slice(0, 200) + "…" : item.text;
+    return `<div class="dataset-block" data-id="${escapeText(item.id)}">
+      <div class="dataset-block-header">
+        <span class="dataset-block-file">📄 ${escapeText(item.file)}</span>
+        <span class="dataset-block-chars">${item.chars.toLocaleString()} ${t("train_corpus_chars")}</span>
+      </div>
+      <pre class="dataset-block-text">${escapeText(preview)}</pre>
+      <div class="dataset-block-actions">
+        <button class="btn-ghost btn-xs" onclick="deleteDatasetBlock('${escapeText(item.id)}', this)">${t("dataset_block_delete")}</button>
+        ${item.text.length > 200 ? `<button class="btn-ghost btn-xs" onclick="toggleBlockFull(this)">${t("show_more") || "Показать все"}</button>` : ""}
+      </div>
+    </div>`;
+  }).join("");
+  el.innerHTML = `
+    <div class="dataset-toolbar">
+      <span class="dataset-page-info">${t("dataset_page_of").replace("{page}", _datasetPage).replace("{total}", totalPages)}</span>
+      <div class="dataset-toolbar-actions">
+        <button class="btn-ghost btn-xs" onclick="clearDataset()">${t("dataset_clear_btn")}</button>
+        <button class="btn-ghost btn-xs" onclick="setDatasetPage(${_datasetPage - 1})" ${_datasetPage <= 1 ? "disabled" : ""}>${t("dataset_page_prev")}</button>
+        <button class="btn-ghost btn-xs" onclick="setDatasetPage(${_datasetPage + 1})" ${_datasetPage >= totalPages ? "disabled" : ""}>${t("dataset_page_next")}</button>
+      </div>
+    </div>
+    ${items}`;
+}
+
+function setDatasetPage(p) {
+  _datasetPage = p;
+  loadDatasetPage();
+}
+
+async function deleteDatasetBlock(id, btn) {
+  btn.disabled = true;
+  btn.textContent = "…";
+  const r = await apiJson(`/api/data/corpus/content/${encodeURIComponent(id)}`, { method: "DELETE" }).catch(() => null);
+  if (r && r.ok) {
+    const block = btn.closest(".dataset-block");
+    if (block) block.remove();
+    btn.textContent = t("dataset_block_deleted");
+    updateTrainingCorpus();
+  } else {
+    btn.disabled = false;
+    btn.textContent = t("error");
+  }
+}
+
+async function clearDataset() {
+  if (!confirm(t("dataset_clear_confirm"))) return;
+  await apiJson("/api/data/corpus/clear", { method: "POST" });
+  const el = $("tr-dataset-view");
+  if (el) el.innerHTML = `<div class="muted">${t("dataset_cleared")}</div>`;
+  updateTrainingCorpus();
+}
+
+function toggleBlockFull(btn) {
+  const block = btn.closest(".dataset-block");
+  if (!block) return;
+  const pre = block.querySelector(".dataset-block-text");
+  if (!pre) return;
+  const isFull = pre.classList.toggle("dataset-block-full");
+  btn.textContent = isFull ? (t("show_less") || "Скрыть") : (t("show_more") || "Показать все");
+}
+
+// ===== CRAWL (встроен в панель данных) =====
+let _crawlTimer = null;
+let _crawlPagesHist = [];
+let _crawlCharsHist = [];
+
+async function startCrawl() {
+  const url = $("cr-url")?.value?.trim();
+  if (!url) return;
+  const depth = parseInt($("cr-depth")?.value) || 2;
+  const max_pages = parseInt($("cr-max")?.value) || 50;
+  $("cr-start-btn").style.display = "none";
+  const stopBtn2 = $("cr-stop-btn2");
+  if (stopBtn2) stopBtn2.style.display = "";
+  $("cr-status").classList.remove("hidden");
+  $("cr-log").innerHTML = "";
+  _crawlPagesHist = [];
+  _crawlCharsHist = [];
+  const canvasWrap = document.querySelector(".crawl-chart-wrap");
+  if (canvasWrap) canvasWrap.classList.remove("hidden");
+  const r = await apiJson("/api/data/parse/crawl", { method: "POST", body: JSON.stringify({ url, depth, max_pages }) });
+  if (!r.ok) { $("cr-start-btn").style.display = ""; if (stopBtn2) stopBtn2.style.display = "none"; return; }
+  if (_crawlTimer) clearInterval(_crawlTimer);
+  _crawlTimer = setInterval(pollCrawl, 1000);
+  pollCrawl();
+}
+
+async function stopCrawl() {
+  await apiJson("/api/data/parse/crawl/stop", { method: "POST" });
+  $("cr-start-btn").style.display = "";
+  const stopBtn2 = $("cr-stop-btn2");
+  if (stopBtn2) stopBtn2.style.display = "none";
+}
+
+async function pollCrawl() {
+  const s = await apiJson("/api/data/parse/crawl").catch(() => null);
+  if (!s) return;
+  const pagesEl = $("cr-pages"); if (pagesEl) pagesEl.textContent = s.ok;
+  const charsEl = $("cr-chars"); if (charsEl) charsEl.textContent = (s.chars || 0).toLocaleString();
+  const errEl = $("cr-errors"); if (errEl) errEl.textContent = s.errors;
+  const stEl = $("cr-state");
+  if (stEl) {
+    if (s.state === "running") { stEl.textContent = "⏳ " + t("crawl_state_running"); stEl.className = "crawl-state running"; }
+    else if (s.state === "done") {
+      stEl.textContent = "✅ " + t("crawl_state_done"); stEl.className = "crawl-state done";
+      $("cr-start-btn").style.display = "";
+      const stopBtn2 = $("cr-stop-btn2"); if (stopBtn2) stopBtn2.style.display = "none";
+      if (_crawlTimer) { clearInterval(_crawlTimer); _crawlTimer = null; }
+      updateTrainingCorpus();
+    } else if (s.state === "stopped") {
+      stEl.textContent = "⏹ " + t("crawl_state_stopped"); stEl.className = "crawl-state stopped";
+      $("cr-start-btn").style.display = "";
+      const stopBtn2 = $("cr-stop-btn2"); if (stopBtn2) stopBtn2.style.display = "none";
+      if (_crawlTimer) { clearInterval(_crawlTimer); _crawlTimer = null; }
+      updateTrainingCorpus();
+    } else { stEl.textContent = t("crawl_state_idle"); stEl.className = "crawl-state"; }
+  }
+  const total = s.ok + s.errors || 1;
+  const maxPages = parseInt($("cr-max")?.value) || 1;
+  const pct = Math.min(100, Math.round((s.ok + s.errors) / Math.max(maxPages, total) * 100));
+  const prog = $("cr-progress"); if (prog) prog.style.width = pct + "%";
+  const pages = s.pages || [];
+  const logEl = $("cr-log");
+  if (logEl) {
+    logEl.innerHTML = pages.slice(-10).map(p =>
+      `<div class="crawl-log-item">${escapeText(p.url)} — ${p.chars} chars (depth ${p.depth})</div>`
+    ).join("");
+  }
+  // chart
+  _crawlPagesHist.push(s.ok);
+  _crawlCharsHist.push(s.chars || 0);
+  if (_crawlPagesHist.length > 300) { _crawlPagesHist.shift(); _crawlCharsHist.shift(); }
+  drawCrawlChart();
+}
+
+function drawCrawlChart() {
+  const cv = $("cr-chart");
+  if (!cv) return;
+  const dpr = window.devicePixelRatio || 1;
+  const cssW = 600, cssH = 120;
+  cv.width = cssW * dpr;
+  cv.height = cssH * dpr;
+  cv.style.width = cssW + "px";
+  cv.style.height = cssH + "px";
+  const ctx = cv.getContext("2d");
+  ctx.scale(dpr, dpr);
+  ctx.clearRect(0, 0, cssW, cssH);
+  if (_crawlPagesHist.length < 2) return;
+  const pad = { top: 8, bottom: 16, left: 36, right: 10 };
+  const plotW = cssW - pad.left - pad.right;
+  const plotH = cssH - pad.top - pad.bottom;
+  _drawChartGrid(ctx, pad.left, pad.top, plotW, plotH, 3);
+  // pages (green)
+  _drawSingleLine(ctx, _crawlPagesHist, pad.left, pad.top, plotW, plotH,
+    "#4ade80", "rgba(74,222,128,0.10)");
+  // chars (blue)
+  _drawSingleLine(ctx, _crawlCharsHist, pad.left, pad.top, plotW, plotH,
+    "#818cf8", "rgba(129,140,248,0.10)");
+  // labels
+  ctx.font = "9px sans-serif";
+  ctx.fillStyle = "#4b5563"; ctx.textAlign = "right";
+  const maxP = Math.max(..._crawlPagesHist), maxC = Math.max(..._crawlCharsHist);
+  ctx.fillText(maxP, pad.left - 4, pad.top + 10);
+  ctx.fillText(0, pad.left - 4, pad.top + plotH);
+  ctx.textAlign = "left";
+  // legend
+  const lastP = _crawlPagesHist[_crawlPagesHist.length - 1];
+  const lastC = _crawlCharsHist[_crawlCharsHist.length - 1];
+  ctx.font = "10px sans-serif";
+  ctx.fillStyle = "#4ade80";
+  ctx.fillRect(pad.left, cssH - 14, 8, 2);
+  ctx.fillStyle = "#9ca3af";
+  ctx.fillText(`${t("crawl_pages")}: ${lastP}`, pad.left + 12, cssH - 10);
+  ctx.fillStyle = "#818cf8";
+  ctx.fillRect(pad.left + 100, cssH - 14, 8, 2);
+  ctx.fillStyle = "#9ca3af";
+  ctx.fillText(`${t("crawl_chars")}: ${_fmtChartNum(lastC)}`, pad.left + 112, cssH - 10);
+}
+
+// ===== TRAINING CORE =====
 async function doTrain() {
-  const model_id = $("tr-model").value; if (!model_id) return;
-  const mode = ($("tr-mode") || {}).value || "adapter";
+  const model_id = $("tr-model")?.value;
+  if (!model_id) return;
+  const mode = ($("tr-mode") || {}).value || "scratch";
   const teacher_id = mode === "distill" ? ($("tr-teacher") || {}).value : null;
-  const msg = $("tr-train-msg");
-  msg.textContent = t("loading");
-  const r = await apiJson("/api/training/start", { method: "POST", body: JSON.stringify({ model_id, mode, teacher_id }) });
-  if (!r.ok) { msg.textContent = r.reason || t("training_start_err"); return; }
+  const epochs = parseInt($("tr-epochs")?.value) || 1;
+  const lr = parseFloat($("tr-lr")?.value) || 2e-4;
+  const statusEl = $("tr-train-status"); if (statusEl) statusEl.classList.remove("hidden");
+  const msg = $("tr-metrics"); if (msg) msg.innerHTML = t("loading");
+  $("tr-start-btn").style.display = "none";
+  $("tr-stop-btn").style.display = "";
+  _trainLossHist = [];
+  _trainPplHist = [];
+  const r = await apiJson("/api/training/start", { method: "POST", body: JSON.stringify({ model_id, mode, teacher_id, epochs, lr }) });
+  if (!r.ok) {
+    if (msg) msg.innerHTML = `⚠ ${escapeText(r.reason || t("training_start_err"))}`;
+    $("tr-start-btn").style.display = ""; $("tr-stop-btn").style.display = "none";
+    return;
+  }
   if (_trainTimer) clearInterval(_trainTimer);
   _trainTimer = setInterval(pollTrain, 1500); pollTrain();
 }
+
 async function pollTrain() {
   const s = await apiJson("/api/training/status").catch(() => null);
   if (!s) return;
-  const msg = $("tr-train-msg");
+  const msg = $("tr-metrics"); const prog = $("tr-progress"); const statusEl = $("tr-train-status");
+  if (!msg) return;
   if (s.state === "running") {
-    msg.innerHTML = `⏳ ${escapeText(s.stage)} — ${Math.round((s.progress || 0) * 100)}% (шаг ${s.step}/${s.total}, loss ${s.loss != null ? s.loss : "—"}) <button class="btn-sm" onclick="stopTrain()">⏹ ${t("stop_gen")}</button>`;
+    const pct = Math.round((s.progress || 0) * 100);
+    if (prog) prog.style.width = pct + "%";
+    if (s.loss != null) {
+    _trainLossHist.push(s.loss);
+    _trainPplHist.push(Math.exp(s.loss));
+  }
+    const speed = s.step > 0 && s.total > 0 ? (s.step / (s.total * 0.001 || 1)).toFixed(2) : "—";
+    const lastLoss = s.loss != null ? s.loss.toFixed(4) : "—";
+    const lastPpl = s.loss != null ? Math.exp(s.loss).toFixed(2) : "—";
+    msg.innerHTML = `<span class="train-metric">${t("train_step")}: <b>${s.step}</b>/${s.total}</span>
+      <span class="train-metric">${t("train_loss")}: <b>${lastLoss}</b></span>
+      <span class="train-metric">${t("train_chart_perplexity")}: <b>${lastPpl}</b></span>
+      <span class="train-metric">${t("train_speed")}: <b>${speed} ${t("train_samples_sec")}</b></span>
+      <span class="train-metric">📋 ${escapeText(s.stage)}</span>
+      <span class="train-metric"><button class="btn-sm" onclick="stopTrain()" style="background:#7f1d1d;border:1px solid #ef4444;color:#fca5a5;padding:2px 8px">${t("train_stop")}</button></span>`;
+    drawTrainLossChart();
   } else if (s.state === "done") {
-    msg.textContent = `✅ ${t("training_start_ok")} · ${s.adapter}`; clearInterval(_trainTimer); _trainTimer = null;
+    if (prog) prog.style.width = "100%";
+    msg.innerHTML = `✅ ${t("done")} · loss: ${s.loss != null ? s.loss.toFixed(4) : "—"}`;
+    $("tr-start-btn").style.display = ""; $("tr-stop-btn").style.display = "none";
+    clearInterval(_trainTimer); _trainTimer = null;
+    loadTrainHistory();
   } else if (s.state === "error") {
-    msg.textContent = `⚠ ${s.error || t("error")}`; clearInterval(_trainTimer); _trainTimer = null;
+    msg.innerHTML = `⚠ ${escapeText(s.error || t("error"))}`;
+    $("tr-start-btn").style.display = ""; $("tr-stop-btn").style.display = "none";
+    clearInterval(_trainTimer); _trainTimer = null;
   } else if (s.state === "stopped") {
-    msg.textContent = "⏹"; clearInterval(_trainTimer); _trainTimer = null;
-  } else { msg.textContent = s.stage || ""; }
+    msg.innerHTML = "⏹ " + t("agent_stopped");
+    $("tr-start-btn").style.display = ""; $("tr-stop-btn").style.display = "none";
+    clearInterval(_trainTimer); _trainTimer = null;
+  } else {
+    msg.innerHTML = escapeText(s.stage || "");
+  }
 }
+
+function _fmtChartNum(v) {
+  if (v >= 1e6) return (v / 1e6).toFixed(1) + "M";
+  if (v >= 1e3) return (v / 1e3).toFixed(1) + "K";
+  return v.toFixed(2);
+}
+
+function _drawSingleLine(ctx, data, x0, y0, w, h, color, fillColor) {
+  if (data.length < 2) return;
+  const min = Math.min(...data), max = Math.max(...data);
+  const range = Math.max(max - min, 0.001);
+  const step = w / Math.max(data.length - 1, 1);
+  ctx.strokeStyle = color; ctx.lineWidth = 2; ctx.beginPath();
+  data.forEach((v, i) => {
+    const x = x0 + i * step, y = y0 + h - ((v - min) / range) * h;
+    i ? ctx.lineTo(x, y) : ctx.moveTo(x, y);
+  });
+  ctx.stroke();
+  ctx.lineTo(x0 + (data.length - 1) * step, y0 + h);
+  ctx.lineTo(x0, y0 + h); ctx.closePath();
+  ctx.fillStyle = fillColor; ctx.fill();
+}
+
+function _drawChartGrid(ctx, x0, y0, w, h, n) {
+  ctx.strokeStyle = "#1e2230"; ctx.lineWidth = 1;
+  for (let i = 0; i <= n; i++) {
+    const y = y0 + (h / n) * i;
+    ctx.beginPath(); ctx.moveTo(x0, y); ctx.lineTo(x0 + w, y); ctx.stroke();
+  }
+}
+
+function drawTrainLossChart() {
+  const cv = $("tr-loss-chart");
+  if (!cv) return;
+  cv.classList.remove("hidden");
+  const dpr = window.devicePixelRatio || 1;
+  const cssW = 600, cssH = 140;
+  cv.width = cssW * dpr;
+  cv.height = cssH * dpr;
+  cv.style.width = cssW + "px";
+  cv.style.height = cssH + "px";
+  const ctx = cv.getContext("2d");
+  ctx.scale(dpr, dpr);
+  ctx.clearRect(0, 0, cssW, cssH);
+  const n = _trainLossHist.length;
+  if (n < 2) return;
+  // split into two equal charts: loss (top) | perplexity (bottom)
+  const halfH = (cssH - 4) / 2;
+  const padL = 42, padR = 10, padT = 14, padB = 8;
+  const plotW = cssW - padL - padR;
+
+  function drawMini(data, yOff, color, fillColor, label, fmtFn) {
+    const plotH = halfH - padT - padB;
+    const y0 = yOff + padT;
+    _drawChartGrid(ctx, padL, y0, plotW, plotH, 2);
+    _drawSingleLine(ctx, data, padL, y0, plotW, plotH, color, fillColor);
+    // label + current value
+    const last = data[n - 1];
+    ctx.font = "600 11px sans-serif";
+    ctx.fillStyle = "#9ca3af";
+    ctx.fillText(label, padL, yOff + 11);
+    ctx.fillStyle = color;
+    ctx.fillText(fmtFn(last), padL + ctx.measureText(label).width + 8, yOff + 11);
+    // Y-axis min/max
+    const min = Math.min(...data), max = Math.max(...data);
+    ctx.font = "9px sans-serif";
+    ctx.fillStyle = "#4b5563";
+    ctx.textAlign = "right";
+    ctx.fillText(fmtFn(max), padL - 4, y0 + 10);
+    ctx.fillText(fmtFn(min), padL - 4, y0 + plotH);
+    ctx.textAlign = "left";
+  }
+
+  drawMini(_trainLossHist, 0, "#f59e0b", "rgba(245,158,11,0.10)",
+    t("train_chart_loss") + ":", v => v.toFixed(4));
+  drawMini(_trainPplHist, halfH + 4, "#3b82f6", "rgba(59,130,246,0.10)",
+    t("train_chart_perplexity") + ":", _fmtChartNum);
+}
+
 async function stopTrain() { await apiJson("/api/training/stop", { method: "POST" }); }
+
+async function loadTrainHistory() {
+  const el = $("tr-history");
+  if (!el) return;
+  const r = await apiJson("/api/training/history").catch(() => ({ history: [] }));
+  const h = r.history || [];
+  if (!h.length) { el.innerHTML = `<span class="muted">${t("train_history_empty")}</span>`; return; }
+  const rows = h.slice().reverse().map(x => {
+    const date = new Date((x.ts || 0) * 1000).toLocaleString();
+    const modeLabel = x.mode === "scratch" ? t("train_mode_scratch") : t("train_mode_distill");
+    return `<div class="train-history-item">
+      <div class="train-history-info">
+        <div class="train-history-title">${escapeText(x.model_id || "")} · ${escapeText(modeLabel)}</div>
+        <div class="train-history-meta">${escapeText(date)} · ${x.steps || 0} ${t("train_history_steps")}</div>
+      </div>
+      <div class="train-history-loss">${x.loss != null ? x.loss.toFixed(4) : "—"}</div>
+    </div>`;
+  }).join("");
+  el.innerHTML = rows;
+}
 
 // ===== ЛОГИ =====
 let _logsTab = "actions"; // "actions" | "console"
