@@ -18,10 +18,15 @@ import config
 from core import agentmgr, chats, coordinator, metrics, model_registry, parser, safety, stats
 from core.engine import engine
 from training import lora
-from web.api.auth import check_password, issue_token, require_auth
+from web.api.auth import check_password, issue_token, require_api_key, require_auth
 
 STATIC = Path(__file__).resolve().parent.parent / "static"
 app = FastAPI(title="Local Autonomous AI")
+
+# CORS: внешний API (/v1/*) доступен откуда угодно
+from fastapi.middleware.cors import CORSMiddleware  # noqa: E402
+app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"],
+                   allow_headers=["*"], allow_credentials=False)
 
 # --- Лог приложения (как в консоли) → logs/app.log ---
 config.LOGS_DIR.mkdir(parents=True, exist_ok=True)
@@ -555,6 +560,80 @@ async def ws_status(ws: WebSocket):
             await asyncio.sleep(2)
     except WebSocketDisconnect:
         pass
+
+
+# ===== OpenAI-совместимый API (модель на сервере, доступ откуда угодно) =====
+# Авторизация: Authorization: Bearer <AI_API_KEY>  (или X-API-Key)
+class OAIMessage(BaseModel):
+    role: str
+    content: str
+
+class OAIChatReq(BaseModel):
+    model: str | None = None
+    messages: list[OAIMessage]
+    stream: bool = False
+    max_tokens: int | None = None
+    temperature: float | None = None
+
+
+def _ensure_model_for_api(model_id: str | None):
+    if model_id and model_id in config.MODEL_REGISTRY and model_id != engine.model_id:
+        engine.load(model_id)
+    if not engine.loaded:
+        from core.engine import last_model
+        engine.load(last_model())
+
+
+@app.get("/v1/models", dependencies=[Depends(require_api_key)])
+def oai_models():
+    return {"object": "list", "data": [
+        {"id": m["id"], "object": "model", "owned_by": "local"}
+        for m in model_registry.list_models()]}
+
+
+@app.post("/v1/chat/completions", dependencies=[Depends(require_api_key)])
+def oai_chat(req: OAIChatReq):
+    import time
+    import uuid
+    try:
+        _ensure_model_for_api(req.model)
+    except Exception as e:
+        return JSONResponse({"error": {"message": str(e), "type": "model_error"}}, status_code=400)
+    messages = [{"role": m.role, "content": m.content} for m in req.messages]
+    kw = {}
+    if req.max_tokens:
+        kw["max_tokens"] = req.max_tokens
+    cid = "chatcmpl-" + uuid.uuid4().hex[:24]
+    created = int(time.time())
+    model_name = engine.model_id
+    safety.set_stop(False)
+
+    if req.stream:
+        def sse():
+            head = {"id": cid, "object": "chat.completion.chunk", "created": created, "model": model_name,
+                    "choices": [{"index": 0, "delta": {"role": "assistant"}, "finish_reason": None}]}
+            yield f"data: {json.dumps(head)}\n\n"
+            try:
+                for tok in engine.generate_stream(messages, **kw):
+                    ch = {"id": cid, "object": "chat.completion.chunk", "created": created, "model": model_name,
+                          "choices": [{"index": 0, "delta": {"content": tok}, "finish_reason": None}]}
+                    yield f"data: {json.dumps(ch, ensure_ascii=False)}\n\n"
+                    if safety.stop_requested():
+                        break
+            except Exception as e:
+                yield f"data: {json.dumps({'error': {'message': str(e)}})}\n\n"
+            tail = {"id": cid, "object": "chat.completion.chunk", "created": created, "model": model_name,
+                    "choices": [{"index": 0, "delta": {}, "finish_reason": "stop"}]}
+            yield f"data: {json.dumps(tail)}\n\n"
+            yield "data: [DONE]\n\n"
+        return StreamingResponse(sse(), media_type="text/event-stream",
+                                 headers={"X-Accel-Buffering": "no", "Cache-Control": "no-cache"})
+
+    text = "".join(engine.generate_stream(messages, **kw))
+    return {"id": cid, "object": "chat.completion", "created": created, "model": model_name,
+            "choices": [{"index": 0, "message": {"role": "assistant", "content": text},
+                         "finish_reason": "stop"}],
+            "usage": {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0}}
 
 
 # --- Статика (UI) ---

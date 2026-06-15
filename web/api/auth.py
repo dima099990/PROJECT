@@ -41,3 +41,11 @@ async def require_auth(authorization: str = Header(default="")) -> None:
     token = authorization.removeprefix("Bearer ").strip()
     if not verify_token(token):
         raise HTTPException(status_code=401, detail="unauthorized")
+
+
+async def require_api_key(authorization: str = Header(default=""),
+                          x_api_key: str = Header(default="")) -> None:
+    """Авторизация внешнего API (/v1/*) по API-ключу (Bearer или X-API-Key)."""
+    key = (authorization.removeprefix("Bearer ").strip() or x_api_key).strip()
+    if not key or not hmac.compare_digest(key, config.API_KEY):
+        raise HTTPException(status_code=401, detail="invalid api key")

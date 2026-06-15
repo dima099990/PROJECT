@@ -33,6 +33,9 @@ PORT = int(os.getenv("AI_PORT", "8000"))
 # Пароль берётся из .env (AI_PASSWORD). Дефолт только для первого запуска.
 PASSWORD = os.getenv("AI_PASSWORD", "admin")
 SECRET_KEY = os.getenv("AI_SECRET", "change-me-in-env")
+# Ключ для внешнего OpenAI-совместимого API (/v1/*). По умолчанию = пароль.
+# Для продакшена задай свой: AI_API_KEY=sk-...
+API_KEY = os.getenv("AI_API_KEY", PASSWORD)
 
 # --- Язык интерфейса по умолчанию ---
 DEFAULT_LANG = os.getenv("AI_LANG", "ru")  # ru | en
