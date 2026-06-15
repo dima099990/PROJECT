@@ -354,9 +354,10 @@ async function removeModel(id) {
 async function doLoadModel(id, btn) {
   btn.disabled = true; btn.textContent = t("loading_model");
   try {
-    await api("/api/models/load", { method: "POST", body: JSON.stringify({ model_id: id }) });
+    const r = await apiJson("/api/models/load", { method: "POST", body: JSON.stringify({ model_id: id }) });
+    if (r && r.ok === false) alert(r.reason || t("error"));
     await refreshStatus(); await loadModels();
-  } catch (e) { btn.textContent = t("error"); }
+  } catch (e) { btn.disabled = false; btn.textContent = t("error"); }
 }
 
 // ===== SCRATCH (модель с нуля) =====

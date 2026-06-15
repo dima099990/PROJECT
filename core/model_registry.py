@@ -73,7 +73,9 @@ def ensure_model(model_id: str, backend: str | None = None) -> Path:
             backend = "cpu"
     repo = resolve_repo(model_id, backend)
     if not repo:
-        raise ValueError(f"Нет репозитория для {model_id} (backend={backend})")
+        if config.MODEL_REGISTRY.get(model_id, {}).get("type") == "scratch":
+            raise ValueError("Модель «с нуля» ещё не обучена — обучите её в панели «Обучение» (режим «С нуля»), потом загружайте")
+        raise ValueError(f"Нет источника для модели {model_id}")
 
     from huggingface_hub import snapshot_download  # lazy
     m = config.MODEL_REGISTRY[model_id]

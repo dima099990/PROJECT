@@ -163,8 +163,11 @@ def models():
 
 @app.post("/api/models/load", dependencies=[Depends(require_auth)])
 def models_load(req: ModelReq):
-    engine.load(req.model_id)  # качает при необходимости + грузит
-    return {"ok": True, "active": engine.model_id}
+    try:
+        engine.load(req.model_id)  # качает при необходимости + грузит
+        return {"ok": True, "active": engine.model_id}
+    except Exception as e:
+        return JSONResponse({"ok": False, "reason": str(e)}, status_code=400)
 
 @app.get("/api/models/repo_files", dependencies=[Depends(require_auth)])
 def models_repo_files(repo: str):
