@@ -63,8 +63,11 @@ def main() -> None:
 
     step("2/5 PyTorch под железо")
     if has_nvidia():
-        print("NVIDIA обнаружена → CUDA-сборка torch")
-        run([py, "-m", "pip", "install", "torch", "--index-url", "https://download.pytorch.org/whl/cu121"])
+        # torch 2.4.1 cu121: поддерживает старые GPU (Pascal sm_61, напр. GTX 1060)
+        # И имеет новый is_autocast_enabled(device_type) — совместим с transformers 5.x.
+        # Не ставить cu118/torch<2.4 — упадёт "is_autocast_enabled() takes no arguments".
+        print("NVIDIA обнаружена → torch 2.4.1 cu121 (Pascal+совместимость)")
+        run([py, "-m", "pip", "install", "torch==2.4.1", "--index-url", "https://download.pytorch.org/whl/cu121"])
     elif has_rocm():
         print("AMD ROCm обнаружена → ROCm-сборка torch")
         run([py, "-m", "pip", "install", "torch", "--index-url", "https://download.pytorch.org/whl/rocm6.0"])
