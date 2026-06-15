@@ -127,6 +127,12 @@ class AgentRunReq(BaseModel):
     task: str
     max_steps: int = 8
 
+class TrainReq(BaseModel):
+    model_id: str
+    mode: str = "adapter"          # adapter | scratch | distill
+    teacher_id: str | None = None
+    epochs: int = 1
+
 
 # --- Авторизация ---
 @app.post("/api/login")
@@ -425,8 +431,8 @@ def safety_resume():
 
 # --- Обучение LoRA без GPU (фоновый поток) ---
 @app.post("/api/training/start", dependencies=[Depends(require_auth)])
-def training_start(req: ModelReq):
-    return lora.start_training(req.model_id)
+def training_start(req: TrainReq):
+    return lora.start_training(req.model_id, mode=req.mode, teacher_id=req.teacher_id, epochs=req.epochs)
 
 @app.get("/api/training/status", dependencies=[Depends(require_auth)])
 def training_status():
